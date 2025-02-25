@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "setup": "node setupDatabase.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1"
+  }
+}
