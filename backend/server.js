@@ -5,7 +5,17 @@ require('dotenv').config();
 const pool = require('./db');
 const { execSync } = require('child_process');
 const path = require('path');
+const removeMd = require('remove-markdown');
+const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
 
+//Tu función sanitize se aplica a los textos que llegan o salen de tu API, no al propio código
+function sanitize(text) {
+  // 1) Elimina marcadores de contenido del texto
+  let clean = text.replace(CITATION_REGEX, '');
+  // 2) Quita cualquier sintaxis Markdown
+  clean = removeMd(clean);
+  return clean.trim();
+}
 // Definir rutas absolutas
 const dataDir = path.resolve(__dirname, '../database/local');
 const logFile = path.resolve(__dirname, '../database/local/logfile');
@@ -66,13 +76,17 @@ const initialize = async () => {
 
     // 3. Iniciar servidor Express
     const app = express();
-
+    const uploadDir = path.join(__dirname, 'uploads');
     // Middlewares
     app.use(cors({
       origin: process.env.FRONTEND_URL || "http://localhost:3000",
     }));
-    app.use(express.json({ limit: '10mb' }));
+    app.use(
+      '/uploads',
+      express.static(uploadDir)); //:contentReference[oaicite:0]{index=0}
+    app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
+    app.use(cors(/*…*/));
 
     // Rutas
     app.use("/api/users", require('./routes/users')); // Asegúrate que la ruta sea correcta

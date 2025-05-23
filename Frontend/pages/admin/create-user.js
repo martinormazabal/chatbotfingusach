@@ -19,6 +19,7 @@ export default function CreateUser() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+    setMessage(""); // Clear previous messages
     try {
       const res = await fetch("/api/users/register", {
         method: "POST",
@@ -27,20 +28,16 @@ export default function CreateUser() {
       });
       const data = await res.json();      
       if (res.ok) {
-        setMessage("Usuario creado exitosamente");
-      } else{
-        setMessage(data.message || "Error al registrar usuario");        
+        setMessage("Usuario creado exitosamente: " + data.user.email);
+      } else {
+        // The backend sends specific messages for validation or duplicate errors
+        setMessage(data.message || "Error desconocido al registrar usuario");
       }
 
     } catch (error) {
-      console.error("Error en handleSubmit:", error);
-      setMessage(
-        error.message.includes("Failed to fetch")
-          ? "Error de conexión con el servidor"
-          : error.message.includes("duplicate")
-          ? "El correo ya está registrado"
-          : "Error en el servidor"
-      );
+      console.error("Error en handleSubmit (fetch or JSON parse):", error);
+      // This catch block is for network errors or issues parsing the response
+      setMessage("Error de conexión o respuesta inválida del servidor.");
     } finally {
       setIsLoading(false);
     }

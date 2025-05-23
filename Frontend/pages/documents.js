@@ -138,7 +138,7 @@ export default function DocumentsPage() {
                       </pre>
                     </div>
                     <div className="mt-3 flex justify-between items-center">
-                      <div>
+                      <div key={doc.id} className="border rounded-lg p-4 shadow-md">
                         <Link href={`/documents/${doc.id}`} legacyBehavior>
                           <a className="text-sm text-blue-600 hover:underline">
                             Ver detalle

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   role VARCHAR(50)
-    CHECK (role IN ('estudiante','funcionario','administrador de documentos'))
+    CHECK (role IN ('estudiante','funcionario','administrador de documentos','admin'))
     DEFAULT 'estudiante',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS documents (
   title VARCHAR(255) NOT NULL,
   content TEXT NOT NULL,
   uploaded_by VARCHAR(100) NOT NULL,
+  filename TEXT NOT NULL,
   upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -64,8 +65,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   user_id INT REFERENCES users(id) ON DELETE CASCADE,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );\n
--- INSERT INTO users (username, email, password_hash, role) VALUES
---  ('user1', 'user1@example.com', 'hashed_password_1', 'estudiante'),
+ INSERT INTO users (username, email, password_hash, role)
+ SELECT 'admin', 'admin@usach.cl', crypt('admin', gen_salt('bf')), 'admin'
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@usach.cl');
 --  ('user2', 'user2@example.com', 'hashed_password_2', 'funcionario'),
 --  ('user3', 'user3@example.com', 'hashed_password_3', 'administrador de documentos');
 

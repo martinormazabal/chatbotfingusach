@@ -2,7 +2,6 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const pool = require("../db");
 const nodemailer = require("nodemailer");
-const { Client } = require("pg");
 require("dotenv").config();
 
 const router = express.Router();
@@ -41,22 +40,37 @@ router.post("/register", async (req, res) => {
       [username, email, hashedPassword, role || 'estudiante']
     );
 
-    // Enviar correo al nuevo usuario
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Bienvenido al sistema",
-      text: `Hola ${username},\n\nTu cuenta ha sido creada con éxito.\nCorreo: ${email}\nContraseña: (la que ingresaste)\n\nSaludos,\nAdministración`,
-    };
-    await transporter.sendMail(mailOptions);
-    transporter.sendMail(mailOptions, (error) => {
-      if (error) console.error("Error al enviar email:", error);
-    });
+    // Enviar respuesta de éxito al cliente DESPUÉS de insertar en DB
     res.status(201).json({ message: "Usuario creado exitosamente.", user: newUser.rows[0] });
+
+    // Intentar enviar correo de bienvenida de forma asíncrona DESPUÉS de enviar la respuesta
+    try {
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: "Bienvenido al sistema",
+        text: `Hola ${username},
+
+Tu cuenta ha sido creada con éxito.
+Correo: ${email}
+Contraseña: (la que ingresaste)
+
+Saludos,
+Administración`,
+      };
+      await transporter.sendMail(mailOptions);
+      console.log("Email de bienvenida enviado a:", email); // Log de éxito
+    } catch (emailError) {
+      console.error("Error al enviar email de bienvenida:", emailError); // Log de error de email
+      // NO enviar respuesta al cliente aquí, ya se envió la respuesta de éxito.
+    }
+
   } catch (error) {
-    console.error("Error al registrar usuario:", error);
+    console.error("Error en el registro de usuario (antes o durante DB insert):", error); // Log de errores de registro (validación o DB)
+    // Este catch maneja errores antes o durante la inserción en la DB.
     res.status(500).json({
       message: error.code === "23505" ? "El correo ya está registrado" : "Error en el servidor",
+      // details: error.message // Opcional: agregar detalles del error en desarrollo
     });
   }
 });
@@ -73,7 +87,7 @@ router.get("/", async (req, res) => {
 });
 
 // Ruta para actualizar el perfil de un usuario
-router.put("/:id(\\d+)/role", async (req, res) => {
+router.put("/:id(\d+)/role", async (req, res) => {
   try {
     const { id } = req.params;
     if (!req.body.role) {
@@ -111,7 +125,12 @@ router.put("/:id(\\d+)/role", async (req, res) => {
       from: process.env.EMAIL_USER,
       to: user.rows[0].email,
       subject: "Actualización de perfil",
-      text: `Hola ${user.rows[0].username},\n\nTu perfil ha sido actualizado a: ${role}.\n\nSaludos,\nAdministración.`,
+      text: `Hola ${user.rows[0].username},
+
+Tu perfil ha sido actualizado a: ${role}.
+
+Saludos,
+Administración.`,
     };
     await transporter.sendMail(mailOptions);
     */

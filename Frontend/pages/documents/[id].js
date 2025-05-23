@@ -1,41 +1,33 @@
 // frontend/pages/documents/[id].js
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 
 export default function DocumentDetail() {
-  const router = useRouter();
-  const { id } = router.query;
-  const [content, setContent] = useState(null);
-  const [error, setError] = useState(null);
+  const { query: { id } } = useRouter();
+  const [content, setContent] = useState('');
+  const [error, setError]     = useState('');
 
   useEffect(() => {
-    if (id) {
-      const fetchDocumentContent = async () => {
-        try {
-          const res = await fetch(`/api/documents/${id}/content`);
-          if (!res.ok) {
-            throw new Error('Error fetching document content');
-          }
-          const data = await res.json();
-          setContent(data.content);
-        } catch (err) {
-          setError(err.message);
-          setContent(null);
-        }
-      };
-
-      fetchDocumentContent();
-    }
+    if (!id) return;
+    axios.get(`/api/documents/${id}/content`)
+      .then(res => setContent(res.data.content))
+      .catch(err => setError(err.response?.data?.error || 'Error al cargar'));
   }, [id]);
 
+  if (error) return <p className="text-red-500">{error}</p>;
   return (
-    <div>
-      <h1>Document Detail</h1>
-      {content ? (
-        <pre>{content}</pre>
-      ) : (
-        <p>{error || 'Loading document content...'}</p>
-      )}
+    <div className="p-4">
+      <h1 className="text-xl mb-4">Detalle del Documento {id}</h1>
+      <pre className="whitespace-pre-wrap">{content}</pre>
+      <a 
+        href={`/uploads/${content.filename}`} 
+        target="_blank" 
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:underline"
+      >
+        Descargar PDF original
+      </a>
     </div>
   );
 }
