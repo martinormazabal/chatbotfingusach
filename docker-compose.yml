@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # Asegúrate de ajustar estas variables según tu configuración de base de datos real
+      DATABASE_URL: postgres://user:password@database:5432/mydatabase
+    depends_on:
+      - database
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # Asegúrate de ajustar estas variables si tu frontend necesita saber la URL del backend
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:8080
+    depends_on:
+      - backend
+
+  database:
+    image: postgres:13
+    ports:
+      - "5432:5432"
+    environment:
+      # Asegúrate de ajustar estas variables con tus credenciales deseadas
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase
+    volumes:
+      # Esto es opcional, pero ayuda a persistir los datos de la base de datos
+      - db_data:/var/lib/postgresql/data
+
+volumes:
+  db_data:

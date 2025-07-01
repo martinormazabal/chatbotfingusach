@@ -8,8 +8,12 @@ const path = require('path');
 const removeMd = require('remove-markdown');
 const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
 
+
 //Tu función sanitize se aplica a los textos que llegan o salen de tu API, no al propio código
 function sanitize(text) {
+  if (typeof text !== 'string') {
+    throw new Error('Invalid input type for sanitize function. Expected a string.');
+  }
   // 1) Elimina marcadores de contenido del texto
   let clean = text.replace(CITATION_REGEX, '');
   // 2) Quita cualquier sintaxis Markdown

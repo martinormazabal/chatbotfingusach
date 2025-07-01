@@ -1,5 +1,5 @@
 // frontend/pages/admin/assign-role.js
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 
 export default function AssignRolePage() {
@@ -9,144 +9,108 @@ export default function AssignRolePage() {
     userId: "",
     role: "estudiante",
   });
-  const [selectedUsers, setSelectedUsers] = useState([]); // Para eliminar
-  const [message, setMessage] = useState(""); // Para feedback
-  const [isLoading, setIsLoading] = useState(false); // Para botón submit
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [message, setMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    const fetchUsers = async () => {
+    async function fetchUsers() {
       try {
         const res = await fetch("/api/users");
-        if (res.ok) {
-          const data = await res.json();
-          setUsers(data);
-        } else {
-          setMessage(
-            `Error al obtener usuarios: ${res.status} - ${res.statusText}`
-          );
-          console.error("Error fetching users:", res.status, res.statusText);
-        }
-      } catch (error) {
-        console.error("Error fetching users:", error.message);
+        if (!res.ok) throw new Error(`Error ${res.status}`);
+        const data = await res.json();
+        setUsers(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error("Error fetching users:", err);
+        setUsers([]);
         setMessage("Error al cargar usuarios.");
       }
-    };
+    }
     fetchUsers();
   }, []);
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.userId) return setMessage("Selecciona un usuario.");
     setIsLoading(true);
     setMessage("");
-
     try {
       const res = await fetch(`/api/users/${formData.userId}/role`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: formData.role }),
       });
-
       const data = await res.json();
-
       if (res.ok) {
         setMessage("Rol actualizado exitosamente.");
-        // Actualizar lista de usuarios
-        setUsers(
-          users.map((user) =>
-            user.id === Number(formData.userId) ? { ...user, role: formData.role } : user
+        setUsers(prev =>
+          prev.map(u =>
+            u.id === Number(formData.userId) ? { ...u, role: formData.role } : u
           )
         );
       } else {
         setMessage(data.message || "Error al actualizar rol.");
       }
-    } catch (error) {
-      console.error("Update error:", error);
-      setMessage(
-        error.message.includes("Failed to fetch")
-          ? "Error de conexión con el servidor"
-          : "Error en el servidor"
-      );
+    } catch (err) {
+      console.error("Update error:", err);
+      setMessage("Error en el servidor.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Para manejar selección de usuarios a eliminar
-  const handleUserSelection = (userId) => {
-    setSelectedUsers((prevSelected) =>
-      prevSelected.includes(userId)
-        ? prevSelected.filter((id) => id !== userId)
-        : [...prevSelected, userId]
+  const handleUserSelection = (id) => {
+    setSelectedUsers(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
   };
 
-  // Para eliminar usuarios seleccionados
   const deleteSelectedUsers = async () => {
-    if (selectedUsers.length === 0) {
-      setMessage("Selecciona al menos un usuario para eliminar.");
-      return;
-    }
-
-    if (confirm("¿Estás seguro de que quieres eliminar los usuarios seleccionados?")) {
-      try {
-        const res = await fetch("/api/users", {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-          body: JSON.stringify({ ids: selectedUsers }),
-        });
-
-        const data = await res.json();
-
-        if (res.ok) {
-          setMessage(data.message || "Usuarios eliminados exitosamente."); 
-          // Refrescar la lista de usuarios
-          setUsers(users.filter((user) => !selectedUsers.includes(user.id)));
-          setSelectedUsers([]); // Limpiar la selección
-        } else {
-          setMessage(data.message || "Error al eliminar usuarios.");
-        }
-      } catch (error) {
-        console.error("Error deleting users:", error);
-        setMessage("Error al eliminar usuarios.");
+    if (!selectedUsers.length) return setMessage("Selecciona al menos un usuario.");
+    if (!confirm("¿Eliminar seleccionados?")) return;
+    try {
+      const res = await fetch("/api/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedUsers }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(data.message);
+        setUsers(prev => prev.filter(u => !selectedUsers.includes(u.id)));
+        setSelectedUsers([]);
+      } else {
+        setMessage(data.message || "Error al eliminar usuarios.");
       }
+    } catch (err) {
+      console.error(err);
+      setMessage("Error al eliminar usuarios.");
     }
   };
 
-  // Efecto para limpiar la selección si se eliminan todos los usuarios
-  useEffect(() => {
-    if (users.length === 0) {
-      setSelectedUsers([]);
-    }
-  }, [users]);
+  if (!users) return <p>Cargando...</p>;
 
   return (
     <div className="max-w-lg mx-auto mt-10 p-6 bg-white shadow rounded">
       <h2 className="text-xl font-bold mb-4">Asignar Roles</h2>
-      <form onSubmit={handleSubmit}>
+      {message && <p className="mb-4 text-center text-blue-500">{message}</p>}
+      <form onSubmit={handleSubmit} className="space-y-4">
         <select
           name="userId"
           value={formData.userId}
           onChange={handleChange}
           required
-          className="w-full p-2 border mb-2"
+          className="w-full p-2 border"
         >
-          <option value="">Seleccionar usuario</option>
-          {users.map((user) => (
-            <option key={user.id} value={user.id}>
-              {user.username} ({user.role})
+          <option value="">-- Seleccionar usuario --</option>
+          {users.map(u => (
+            <option key={u.id} value={u.id}>
+              {u.username} ({u.role})
             </option>
           ))}
         </select>
@@ -155,11 +119,11 @@ export default function AssignRolePage() {
           value={formData.role}
           onChange={handleChange}
           required
-          className="w-full p-2 border mb-2"
-        > <option value="estudiante">Estudiante</option>
+          className="w-full p-2 border"
+        >
+          <option value="estudiante">Estudiante</option>
           <option value="funcionario">Funcionario</option>
-          <option value="administrador de documentos">Administrador</option>
-          <option value="borrar">Borrar</option>
+          <option value="administrador de documentos">Administrador de documentos</option>
         </select>
         <button
           type="submit"
@@ -169,30 +133,28 @@ export default function AssignRolePage() {
           {isLoading ? "Actualizando..." : "Asignar Rol"}
         </button>
       </form>
-      {/* Sección para eliminar usuarios */}
-      <h3 className="text-lg font-semibold mt-6 mb-2">Eliminar Usuarios</h3>
+
+      <h3 className="text-lg font-semibold mt-8 mb-2">Eliminar Usuarios</h3>
       <ul className="mb-4">
-        {users.map((user) => (
-          <li key={user.id} className="flex items-center">
+        {users.map(u => (
+          <li key={u.id} className="flex items-center">
             <input
               type="checkbox"
-              value={user.id}
-              checked={selectedUsers.includes(user.id)}
-              onChange={() => handleUserSelection(user.id)}
+              checked={selectedUsers.includes(u.id)}
+              onChange={() => handleUserSelection(u.id)}
               className="mr-2"
             />
-            {user.username} ({user.role})
+            {u.username} ({u.role})
           </li>
         ))}
       </ul>
       <button
         onClick={deleteSelectedUsers}
-        disabled={selectedUsers.length === 0}
+        disabled={!selectedUsers.length}
         className="bg-red-500 text-white w-full p-2 rounded disabled:bg-gray-400"
       >
         Eliminar Seleccionados
       </button>
-      {message && <p className="mt-4 text-center text-blue-500">{message}</p>}
     </div>
   );
 }

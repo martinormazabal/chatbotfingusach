@@ -1,5 +1,4 @@
 // backend/routes/requests.js
-
 const express    = require("express");
 const { GoogleGenAI } = require("@google/genai");      // SDK unificado
 const pool       = require("../db");
@@ -19,20 +18,6 @@ function sanitize(text) {
 // Inicializar cliente GenAI 
 if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurada");
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-// Función para dividir texto en chunks
-function splitIntoChunks(text, maxLen = 1500) {
-  const chunks = [];
-  let start = 0;
-  while (start < text.length) {
-    let end = start + maxLen;
-    const nl = text.lastIndexOf("\n", end);
-    if (nl > start) end = nl;
-    chunks.push(text.slice(start, end).trim());
-    start = end;
-  }
-  return chunks;
-}
 
 // Endpoint /chatbot
 router.post("/chatbot", async (req, res) => {
