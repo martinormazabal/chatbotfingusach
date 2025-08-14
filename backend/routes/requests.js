@@ -54,7 +54,7 @@ router.post("/chatbot", async (req, res) => {
     const instruction = `
 Eres un chatbot. Usa solo la información del contexto para responder a las preguntas del usuario.
 Contexto: ${context}
-Si la pregunta no está relacionada con el contexto, responde que solo puedes responder preguntas relacionadas con el contexto.
+Si la pregunta no está relacionada con el contexto, exceptuando por un saludo para poder guíar al usuario algunas de la sugerencia de un resolución aleatoria, responde que solo puedes responder preguntas relacionadas con el contexto.
 Responde de forma concisa y clara.`;
 
   const inputs = `${instruction}\nTexto: ${context}\nUsuario: ${query}\nAsistente:`;
