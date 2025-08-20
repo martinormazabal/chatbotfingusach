@@ -3,6 +3,9 @@ const express    = require("express");
 const { GoogleGenAI } = require("@google/genai");      // SDK unificado
 const pool       = require("../db");
 const removeMd   = require("remove-markdown");
+const fs         = require("fs");
+const fsp        = require("fs").promises;
+const path       = require("path");
 require("dotenv").config();
 
 const router = express.Router();
@@ -85,6 +88,119 @@ Responde de forma concisa y clara.`;
   } catch (err) {
   console.error("❌ Error en /chatbot:", err);
   return res.status(500).json({ error: err.message || "Error de Consulta" });
+  }
+});
+
+// Endpoint para registrar evaluaciones en CSV
+router.post("/log", async (req, res) => {
+  const logFile = path.join(__dirname, "..", "chatbot_logs.csv"); // Redundant, will be declared again
+  const headers = [
+    "case_id",
+    "fecha",
+    "rol_usuario",
+    "pregunta_textual",
+    "referencia_esperada_o_fuente",
+    "respuesta_chatbot",
+    "juicio_correctitud",
+    "tiempo_respuesta_ms",
+    "tipo_error",
+    "observaciones",
+  ];
+
+  try {
+    // 1) Intentar CSV
+    const logDir = path.join(__dirname, "..", "logs");
+    await fsp.mkdir(logDir, { recursive: true });               // asegura carpeta
+    const csvLogFile = path.join(logDir, "chatbot_logs.csv"); // Renamed to avoid confusion
+
+    // crear encabezados si no existe
+    try { 
+      await fsp.access(csvLogFile); 
+      console.log("CSV log file exists."); // Added log
+    } 
+    catch (accessErr) { 
+      if (accessErr.code === 'ENOENT') { // File does not exist
+        await fsp.writeFile(csvLogFile, headers.join(",") + "\n"); 
+        console.log("CSV log file created with headers."); // Added log
+      } else {
+        console.error("❌ CSV access/write header failed unexpectedly:", accessErr.message, accessErr.stack); // More detailed error
+        throw accessErr; // Re-throw to fall back to DB
+      }
+    }
+
+    const b = req.body || {};
+    const line = headers
+      .map((h) =>
+        `"${String(b[h] ?? "").replace(/"/g, '""').replace(/\n/g, " ")}"`
+      )
+      .join(",");
+
+    await fsp.appendFile(csvLogFile, line + "\n");
+    console.log("✅ CSV log successfully written."); // Added log
+    return res.json({ success: true, storage: "csv" });
+
+  } catch (csvErr) {
+    console.error("❌ CSV log failed:", csvErr.code, csvErr.message, csvErr.stack); // More detailed error
+
+    // 2) Fallback a BD
+    try {
+      const q = `
+        INSERT INTO evaluation_logs
+        (case_id, fecha, rol_usuario, pregunta_textual, referencia_esperada_o_fuente,
+         respuesta_chatbot, juicio_correctitud, tiempo_respuesta_ms, tipo_error, observaciones)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        RETURNING id
+      `;
+      const b = req.body || {};
+      const vals = [
+        b.case_id ?? null,
+        b.fecha ? new Date(b.fecha) : new Date(),
+        b.rol_usuario ?? "usuario",
+        b.pregunta_textual ?? "",
+        b.referencia_esperada_o_fuente ?? "",
+        b.respuesta_chatbot ?? "",
+        b.juicio_correctitud ?? null,
+        Number.isFinite(+b.tiempo_respuesta_ms) ? +b.tiempo_respuesta_ms : null,
+        b.tipo_error ?? "",
+        b.observaciones ?? ""
+      ];
+      const { rows } = await pool.query(q, vals);
+      console.log("✅ DB fallback log successfully written."); // Added log
+      return res.json({ success: true, storage: "db_fallback", id: rows[0].id });
+    } catch (dbErr) {
+      console.error("❌ DB fallback failed:", dbErr.message, dbErr.stack); // More detailed error
+      return res.status(500).json({ error: "No se pudo persistir el log", detail: dbErr.message });
+    }
+  }
+});
+
+// Endpoint para guardar evaluaciones en la base de datos
+router.post("/log/db", async (req, res) => {
+  try {
+    const q = `
+      INSERT INTO evaluation_logs
+      (case_id, fecha, rol_usuario, pregunta_textual, referencia_esperada_o_fuente,
+       respuesta_chatbot, juicio_correctitud, tiempo_respuesta_ms, tipo_error, observaciones)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING id`;
+    const b = req.body || {};
+    const vals = [
+      b.case_id ?? null,
+      b.fecha ? new Date(b.fecha) : new Date(),
+      b.rol_usuario ?? 'usuario',
+      b.pregunta_textual ?? '',
+      b.referencia_esperada_o_fuente ?? '',
+      b.respuesta_chatbot ?? '',
+      b.juicio_correctitud ?? null,
+      Number.isFinite(+b.tiempo_respuesta_ms) ? +b.tiempo_respuesta_ms : null,
+      b.tipo_error ?? '',
+      b.observaciones ?? ''
+    ];
+    const { rows } = await pool.query(q, vals);
+    return res.json({ success: true, id: rows[0].id });
+  } catch (err) {
+    console.error("❌ Error guardando log en DB:", err);
+    return res.status(500).json({ error: "No se pudo guardar log en DB" });
   }
 });
 

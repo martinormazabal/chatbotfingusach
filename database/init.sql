@@ -64,10 +64,27 @@ CREATE TABLE IF NOT EXISTS profiles (
   id SERIAL PRIMARY KEY,
   user_id INT REFERENCES users(id) ON DELETE CASCADE,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS evaluation_logs (
+  id SERIAL PRIMARY KEY,
+  case_id TEXT,
+  fecha TIMESTAMP,
+  rol_usuario TEXT,
+  pregunta_textual TEXT,
+  referencia_esperada_o_fuente TEXT,
+  respuesta_chatbot TEXT,
+  juicio_correctitud TEXT CHECK (juicio_correctitud IN ('Correcta','Parcial','Incorrecta')),
+  tiempo_respuesta_ms INT,
+  tipo_error TEXT,
+  observaciones TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
 );\n
  INSERT INTO users (username, email, password_hash, role)
  SELECT 'admin', 'admin@usach.cl', crypt('admin', gen_salt('bf')), 'admin'
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@usach.cl');
+SELECT to_regclass('public.evaluation_logs');   -- debe devolver 'evaluation_logs'
+SELECT COUNT(*) FROM evaluation_logs;
 --  ('user2', 'user2@example.com', 'hashed_password_2', 'funcionario'),
 --  ('user3', 'user3@example.com', 'hashed_password_3', 'administrador de documentos');
 
@@ -96,6 +113,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO chatbotuser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO chatbotuser;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE evaluation_logs TO chatbotuser;
+GRANT USAGE, SELECT ON SEQUENCE evaluation_logs_id_seq TO chatbotuser;
 
 COMMIT;
 --Verificar permisos (opcional)

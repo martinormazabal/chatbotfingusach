@@ -1,3 +1,4 @@
+import React from 'react';
 import { useEffect, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
@@ -28,146 +29,87 @@ export default function DocumentsPage() {
     fetchDocuments();
   }, []);
 
-  const filteredDocs = documents.filter(doc => 
-    doc.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    doc.content?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const toggleContent = (id) => {
+  const toggleExpand = (id) => {
     setExpandedId(expandedId === id ? null : id);
   };
 
   const handleDelete = async (id) => {
-    if (confirm("¿Estás seguro de que quieres eliminar este documento?")) {
+    if (window.confirm("¿Estás seguro de que quieres eliminar este documento?")) {
       try {
-        await axios.delete(`/api/documents/${id}`);
-        setSuccessMessage('Documento eliminado exitosamente');
-        setDocuments(documents.filter(doc => doc.id !== id));
-        
-        // Clear success message after 3 seconds
-        setTimeout(() => {
+        const res = await axios.delete(`/api/documents/${id}`);
+        if (res.status === 200) {
+          setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== id));
+          setSuccessMessage("Documento eliminado exitosamente.");
+          setError(''); // Clear any previous error
+        } else {
+          setError(res.data.message || "Error al eliminar el documento.");
           setSuccessMessage('');
-        }, 3000);
-        
-        // Refresh the document list (though already updated, ensures consistency)
-        refreshDocuments();
+        }
       } catch (error) {
         console.error("Error deleting document:", error);
-        setError(error.response?.data?.error || "Error eliminando documento");
-        setTimeout(() => {
-          setError('');
-        }, 3000);
+        setError(error.response?.data?.message || "Error al eliminar el documento.");
+        setSuccessMessage('');
       }
     }
   };
 
-  const refreshDocuments = async () => {
-    try {
-      const { data } = await axios.get("/api/documents");
-      setDocuments(data);
-    } catch (error) {
-      console.error("Error refreshing documents:", error);
-      setError(error.response?.data?.error || "Error actualizando documentos");
-    }
-  };
+  const filteredDocuments = documents.filter(doc =>
+    doc.title.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div className="container mx-auto p-4">
       <h1 className="text-2xl font-bold mb-6">Documentos Subidos</h1>
-      
-      {/* Barra de búsqueda */}
-      <input
-        type="text"
-        placeholder="Buscar documentos..."
-        onChange={(e) => setSearchTerm(e.target.value)}
-        className="mb-4 p-2 border rounded w-full"
-      />
 
-      {error && (
-        <div className="bg-red-100 text-red-700 p-3 rounded mb-4">
-          {error}
-        </div>
-      )}
+      {error && <p className="text-red-500 mb-4">{error}</p>}
+      {successMessage && <p className="text-green-500 mb-4">{successMessage}</p>}
 
-      {successMessage && (
-        <div className="bg-green-100 text-green-700 p-3 rounded mb-4">
-          {successMessage}
-        </div>
-      )}
+      <div className="mb-4">
+        <input
+          type="text"
+          placeholder="Buscar por título..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full p-2 border border-gray-300 rounded"
+        />
+      </div>
 
-      <div className="grid gap-4">
-        {filteredDocs.map((doc) => {
-          if (
-            doc &&
-            typeof doc === 'object' &&
-            'title' in doc &&
-            'content' in doc &&
-            'uploaded_by' in doc &&
-            'upload_date' in doc
-          ) {
-            return (
-              <div key={doc.id} className="border rounded-lg p-4 shadow-md">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-xl font-semibold">{doc.title}</h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Subido por: {doc.uploaded_by} - {doc.upload_date}
-                    </p>
-                  </div>
+      {filteredDocuments.length === 0 && !error ? (
+        <p>No hay documentos subidos aún o no se encontraron resultados para su búsqueda.</p>
+      ) : (
+        <ul className="space-y-4">
+          {filteredDocuments.map((doc) => (
+            <li key={doc.id} className="bg-white shadow rounded p-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold">{doc.title}</h2>
+                <div>
                   <button
-                    onClick={() => toggleContent(doc.id)}
-                    className="text-blue-600 hover:text-blue-800"
+                    onClick={() => toggleExpand(doc.id)}
+                    className="bg-blue-500 text-white px-3 py-1 rounded mr-2"
                   >
-                    {expandedId === doc.id ? 'Ocultar' : 'Ver más'}
+                    {expandedId === doc.id ? "Ver menos" : "Ver más"}
+                  </button>
+                  <Link href={`/documents/${doc.id}`}>
+                    <button className="bg-green-500 text-white px-3 py-1 rounded mr-2">Ver detalles</button>
+                  </Link>
+                  <button
+                    onClick={() => handleDelete(doc.id)}
+                    className="bg-red-500 text-white px-3 py-1 rounded"
+                  >
+                    Eliminar
                   </button>
                 </div>
-
-                {expandedId === doc.id && (
-                  <div className="mt-4">
-                    <div
-                      className="bg-gray-50 p-3 rounded"
-                      style={{
-                        maxHeight: '300px',
-                        overflowY: 'auto',
-                        overflowX: 'hidden',
-                        wordWrap: 'break-word',
-                      }}
-                    >
-                      <pre className="whitespace-pre-wrap font-sans">
-                        {doc.content}
-                      </pre>
-                    </div>
-                    <div className="mt-3 flex justify-between items-center">
-                      <div key={doc.id} className="border rounded-lg p-4 shadow-md">
-                        <Link href={`/documents/${doc.id}`} legacyBehavior>
-                          <a className="text-sm text-blue-600 hover:underline">
-                            Ver detalle
-                          </a>
-                        </Link>
-                      </div>
-                      <button
-                        onClick={() => handleDelete(doc.id)}
-                        className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded text-xs"
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
-            );
-          } else {
-            console.warn('Invalid document data:', doc);
-            return null; // Skip rendering invalid document
-          }
-        })}
-        
-        {documents.length === 0 && !error && (
-          <div className="text-center py-8 text-gray-500">
-            No hay documentos subidos aún
-          </div>
-        )}
-      </div>
+              <p className="text-sm text-gray-500">Subido por: {doc.uploaded_by} el {doc.upload_date}</p>
+              {expandedId === doc.id && (
+                <div className="mt-2 p-2 bg-gray-100 rounded overflow-auto max-h-40">
+                  <p className="whitespace-pre-wrap">{doc.content}</p>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
