@@ -169,7 +169,9 @@ router.post("/log", async (req, res) => {
       return res.json({ success: true, storage: "db_fallback", id: rows[0].id });
     } catch (dbErr) {
       console.error("❌ DB fallback failed:", dbErr.message, dbErr.stack); // More detailed error
-      return res.status(500).json({ error: "No se pudo persistir el log", detail: dbErr.message });
+      // Evitar que un fallo al persistir el log genere un error 500 visible para el usuario
+      // Responder con éxito=false pero sin estatus de error para que la plataforma no "caiga"
+      return res.json({ success: false, error: "No se pudo persistir el log", detail: dbErr.message });
     }
   }
 });
