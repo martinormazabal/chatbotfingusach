@@ -26,17 +26,24 @@ services:
       - backend
 
   database:
-    image: postgres:13
+    image: postgres:16
+    container_name: pg-local
     ports:
       - "5432:5432"
     environment:
       # Asegúrate de ajustar estas variables con tus credenciales deseadas
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydatabase
+      POSTGRES_USER: chatbotuser
+      POSTGRES_PASSWORD: cp1619comm2k1
+      POSTGRES_DB: chatbotdb
     volumes:
       # Esto es opcional, pero ayuda a persistir los datos de la base de datos
-      - db_data:/var/lib/postgresql/data
+      - ./database/pgdata:/var/lib/postgresql/data
+      - ./database/init_app.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbotuser -d chatbotdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   db_data:

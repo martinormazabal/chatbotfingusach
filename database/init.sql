@@ -6,8 +6,10 @@ DROP TABLE IF EXISTS requests CASCADE;
 DROP TABLE IF EXISTS documents CASCADE;
 */
 -- Resto de tablas...
-
+BEGIN;
 -- (Opcional) Crear usuario
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE USER chatbotuser WITH PASSWORD 'cp1619comm2k1';
 CREATE DATABASE chatbotdb WITH OWNER = chatbotuser;
 CREATE DATABASE postgres WITH OWNER = chatbotuser;
@@ -21,7 +23,6 @@ ALTER USER chatbotuser CREATEROLE;
 \c chatbotdb chatbotuser
 */
 -- Crear la tabla 'users' con la columna role incluida
-BEGIN;
 
 -- 1) Sólo definir tablas y datos en chatbotdb (ejecutar con chatbotuser)
 CREATE TABLE IF NOT EXISTS users (
@@ -79,9 +80,13 @@ CREATE TABLE IF NOT EXISTS evaluation_logs (
   tipo_error TEXT,
   observaciones TEXT,
   created_at TIMESTAMP DEFAULT NOW()
-);\n
- INSERT INTO users (username, email, password_hash, role)
- SELECT 'admin', 'admin@usach.cl', crypt('admin', gen_salt('bf')), 'admin'
+);
+
+
+
+-- Semilla admin (requiere pgcrypto, arriba creada)
+INSERT INTO users (username, email, password_hash, role)
+SELECT 'admin', 'admin@usach.cl', crypt('admin', gen_salt('bf')), 'admin'
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@usach.cl');
 SELECT to_regclass('public.evaluation_logs');   -- debe devolver 'evaluation_logs'
 SELECT COUNT(*) FROM evaluation_logs;
@@ -118,5 +123,4 @@ GRANT USAGE, SELECT ON SEQUENCE evaluation_logs_id_seq TO chatbotuser;
 
 COMMIT;
 --Verificar permisos (opcional)
-\du chatbotuser
 
