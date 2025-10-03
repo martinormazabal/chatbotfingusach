@@ -20,9 +20,11 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
    ```bash
    git clone https://github.com/TU-USUARIO/chatbot-usach.git
    cd chatbot-usach
+   ```
 
 2. Configurar variables de entorno. Crear un archivo .env en la raíz del backend con:
 
+    ```bash
     DB_USER=chatbotuser
     DB_PASSWORD=cp1619comm2k1
     DB_HOST=localhost
@@ -30,33 +32,42 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
     DB_NAME=chatbotdb
     GEMINI_API_KEY=TU_API_KEY
     FRONTEND_URL=http://localhost:3000
+    ```
 
 3. Inicializar base de datos:
 
+    ```bash
     cd database
     psql -U postgres -f init.sql
+    ```
 
 4. Instalar dependencias:
 
+    ```bash
     cd backend
     npm install
     cd ../frontend
     npm install
+    ```
 
 ## ▶️ Ejecución
 
 1. Levantar backend:
 
+    ```bash
     cd backend
     npm run dev
+    ```
 
 El servidor queda disponible en: 
 👉 http://localhost:5000/api
 
 2. Levantar frontend:
 
+    ```bash
     cd frontend
     npm run dev
+    ```
 
 La interfaz queda disponible en:
 👉 http://localhost:3000
@@ -65,11 +76,11 @@ La interfaz queda disponible en:
 
 ## 🧪 Funcionalidades principales
 
-- Autenticación y roles: creación de usuarios y asignación de perfiles.
-- Carga de documentos PDF con extracción de texto y OCR (Tesseract.js).
-- Consulta normativa vía ChatBot conectado a Gemini API. (Se requiere API Key).
-- Registro de evaluaciones (endpoint /api/requests/log) con almacenamiento en tabla `evaluation_logs`.
-- Gestión de solicitudes: búsqueda, detalle y pasos asociados.
+- **Autenticación y roles:** creación de usuarios y asignación de perfiles.
+- **Subida de documentos:** Carga de documentos PDF con extracción de texto y OCR (Tesseract.js).
+- **Consulta normativa vía ChatBot conectado a Gemini API.** (Se requiere API Key).
+- **Registro de evaluaciones (endpoint /api/requests/log) con almacenamiento en tabla `evaluation_logs`.**
+- **Gestión de solicitudes:** búsqueda, detalle y pasos asociados.
 
 ## 📊 Evaluación y pruebas
 
@@ -79,11 +90,11 @@ La interfaz queda disponible en:
 
 ## 📂 Estructura del proyecto
 
-chatbot-usach/
- ├── backend/        # API en Node.js/Express
- ├── frontend/       # Next.js (interfaz)
- ├── database/       # Scripts SQL e inicialización
- └── README.md
+    chatbot-usach/
+    ├── backend/        # API en Node.js/Express
+    ├── frontend/       # Next.js (interfaz)
+    ├── database/       # Scripts SQL e inicialización
+    └── README.md
 
 ## 👩‍🏫 Uso para revisión
 
