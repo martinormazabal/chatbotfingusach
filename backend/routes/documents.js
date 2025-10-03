@@ -6,12 +6,15 @@ const { createWorker } = require("tesseract.js");
 const pool = require("../db");
 const fs = require("fs").promises;
 const { v4: uuidv4 } = require("uuid");
+const { fromPath } = require("pdf2pic");
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', 'uploads');
+const tempImageDir = path.join(__dirname, '..', 'temp_images');
 
-// Ensure upload directory exists
+// Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
+fs.mkdir(tempImageDir, { recursive: true }).catch(console.error);
 
 const storage = multer.diskStorage({
   destination: uploadDir,
@@ -22,56 +25,69 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Pure JavaScript OCR function using Tesseract.js
-async function runOCRonPDF(filePath) {
+// FIX: Correctly handle OCR by converting PDF to an image first.
+async function enhancedOCRProcessing(filePath, originalFilename) {
   let worker;
-  console.log(`Iniciando OCR en el archivo: ${filePath}`);
+  const options = {
+    density: 300,
+    saveFilename: `${path.parse(originalFilename).name}_${uuidv4()}`,
+    savePath: tempImageDir,
+    format: "png",
+    width: 2000,
+    height: 2600
+  };
+  const convert = fromPath(filePath, options);
+  let convertedPage = null;
+
   try {
+    // 1. Convert the first page of the PDF to an image.
+    console.log("Converting PDF to image for OCR...");
+    const pageToConvert = 1;
+    const result = await convert(pageToConvert, { responseType: 'image' });
+    if (!result || !result.path) {
+      throw new Error("Fallo al convertir PDF a imagen.");
+    }
+    convertedPage = result.path;
+    console.log(`Image converted successfully: ${convertedPage}`);
+
+    // 2. Run OCR on the resulting image.
     worker = await createWorker({
-      logger: m => console.log("Tesseract:", m.status, `(${Math.round(m.progress * 100)}%)`),
-      cachePath: path.join(__dirname, '..', 'tesseract-cache'), // Cache in a writable directory
+      logger: m => console.log("Tesseract OCR:", m),
+      cachePath: "./tesseract-cache",
     });
     await worker.loadLanguage("spa+eng");
     await worker.initialize("spa+eng");
-    const { data: { text } } = await worker.recognize(filePath);
-    console.log("OCR completado.");
-    return text || "";
+
+    const { data: { text } } = await worker.recognize(convertedPage);
+    if (!text) {
+      throw new Error("OCR no devolvió texto válido.");
+    }
+    return text;
+
   } catch (error) {
-    console.error(`Error en el proceso de OCR con Tesseract: ${error.stack}`);
-    throw new Error(`Falló el procesamiento OCR. Es posible que el archivo esté corrupto o no sea una imagen compatible.`);
+    console.error(`Error en el proceso de OCR mejorado: ${error.message}`);
+    throw new Error(`Falló el procesamiento OCR. El archivo puede estar corrupto o tener un formato de imagen no compatible.`);
   } finally {
     if (worker) {
       await worker.terminate();
-      console.log("Tesseract worker terminado.");
+    }
+    if (convertedPage) {
+      await fs.unlink(convertedPage).catch(e => console.error("Error al eliminar el archivo de imagen temporal:", e));
     }
   }
 }
 
-// Modified upload route to try both pdf-parse and Tesseract if needed
+// Upload route is safe and does not perform OCR automatically.
 router.post('/upload', upload.single('document'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Archivo no recibido' });
   }
 
-  let extractedText = '';
   try {
-    // 1. Try to extract text with pdf-parse (fast, for text-based PDFs)
     const pdfData = await fs.readFile(req.file.path);
     const pdfInfo = await pdfParse(pdfData);
-    extractedText = (pdfInfo.text || '').trim();
-    console.log(`Texto extraído con pdf-parse: ${extractedText.substring(0, 100)}...`);
+    const extractedText = (pdfInfo.text || '').trim();
 
-    // 2. If text is minimal, assume it's a scanned PDF and run Tesseract OCR
-    if (extractedText.length < 150) { // Adjustable threshold
-      console.log("El texto de pdf-parse es mínimo, iniciando OCR con Tesseract...");
-      const ocrText = await runOCRonPDF(req.file.path);
-      if (ocrText.length > extractedText.length) {
-        extractedText = ocrText;
-        console.log("OCR de Tesseract proveyó mejor resultado.");
-      }
-    }
-
-    // 3. Save to database
     const result = await pool.query(
       `INSERT INTO documents (title, content, uploaded_by, filename) VALUES ($1, $2, $3, $4) RETURNING id, title, upload_date, filename`,
       [req.body.title || req.file.originalname, extractedText, req.body.uploaded_by || 'Anónimo', req.file.filename]
@@ -80,8 +96,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
     res.status(201).json({ success: true, document: result.rows[0] });
   } catch (error) {
     console.error(`Error en la ruta de subida: ${error.stack}`);
-    // Clean up uploaded file on error
-    await fs.unlink(req.file.path).catch(e => console.error("Error al limpiar archivo después de un error:", e));
+    await fs.unlink(req.file.path).catch(e => console.error("Error al limpiar archivo temporal después de un error:", e));
     res.status(500).json({
       error: 'Error procesando documento',
       details: error.message || 'Ocurrió un error desconocido.'
@@ -89,7 +104,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
   }
 });
 
-// OCR route now uses the pure JS function
+// New route to run OCR on-demand.
 router.post('/:id/run-ocr', async (req, res) => {
   const { id } = req.params;
   try {
@@ -100,16 +115,15 @@ router.post('/:id/run-ocr', async (req, res) => {
     const filename = docResult.rows[0].filename;
     const filePath = path.join(uploadDir, filename);
 
-    // Run the pure JS OCR function
-    const extractedText = await runOCRonPDF(filePath);
+    const extractedText = await enhancedOCRProcessing(filePath, filename);
 
     const updatedDoc = await pool.query(
       'UPDATE documents SET content = $1 WHERE id = $2 RETURNING id, content',
       [extractedText.trim(), id]
     );
 
-    res.status(200).json({
-        success: true,
+    res.status(200).json({ 
+        success: true, 
         message: 'OCR procesado y guardado correctamente.',
         content: updatedDoc.rows[0].content
     });
@@ -122,12 +136,10 @@ router.post('/:id/run-ocr', async (req, res) => {
   }
 });
 
-// --- Other routes remain the same ---
-
 router.get('/', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-        SELECT id, title, uploaded_by, content,
+        SELECT id, title, uploaded_by, content, 
                TO_CHAR(upload_date, 'DD/MM/YYYY HH24:MI') AS upload_date,
                filename
         FROM documents
