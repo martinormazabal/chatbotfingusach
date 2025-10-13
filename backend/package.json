@@ -8,7 +8,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "db:init": "node ../database/setupDatabase.js",
     "db:stats": "node scripts/computeStats.js",
-    "db:stats:range": "STATS_START=2025-06-01 STATS_END=2025-07-01 node scripts/computeStats.js"
+    "db:stats:range": "STATS_START=2025-06-01 STATS_END=2025-07-01 node scripts/computeStats.js",
+    "test:requests": "node scripts/smoke-requests-route.js"
   },
   "keywords": [],
   "author": "",

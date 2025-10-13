@@ -60,13 +60,21 @@ export default function Chat() {
               <p>{m.text}</p>
               {m.role === "assistant" && m.sources?.length > 0 && (
                 <div className={styles.sources}>
-                  <span>Fuentes:</span>
-                  <div className={styles.chips}>
+                  <span>Fuentes consultadas</span>
+                  <div className={styles.sourceList}>
                     {m.sources.map((s, idx) => (
-                      <a key={idx} className={styles.chip}
-                         href={s.url} target="_blank" rel="noopener noreferrer" title={s.title}>
+                      <div key={idx} className={styles.sourceCard}>
+                      <a
+                        className={styles.sourceTitle}
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={s.title}
+                      >
                         {s.title}{s.page ? ` (p. ${s.page})` : ""}
                       </a>
+                      {s.excerpt && <p className={styles.sourceExcerpt}>{s.excerpt}</p>}
+                    </div>
                     ))}
                   </div>
                 </div>

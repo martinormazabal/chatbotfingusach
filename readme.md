@@ -87,6 +87,7 @@ La interfaz queda disponible en:
 - Incluye endpoint `/api/requests/stats` para indicadores globales de exactitud, tiempos y errores.
 - Caso de prueba real en tabla `evaluation_logs` (ejemplo: ID 1755789721848).
 - Encuesta de usabilidad (CSUQ) aplicada a prototipo.
+- Chequeo rápido del módulo de chat: `cd backend && npm run test:requests` (no requiere conexión a la base de datos ni credenciales reales de Gemini).
 
 ## 📂 Estructura del proyecto
 

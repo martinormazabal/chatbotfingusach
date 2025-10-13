@@ -1,10 +1,165 @@
 //backend/routes/requests.js
 const express = require("express");
-const { GoogleGenAI, HarmCategory, HarmBlockThreshold } = require("@google/genai");
+const {
+  GoogleGenerativeAI,
+  HarmCategory,
+  HarmBlockThreshold,
+} = require("@google/generative-ai");
 const pool = require("../db");
 const removeMd = require("remove-markdown");
 const fsp = require("fs").promises;
 const path = require("path");
+const pdfParse = require("pdf-parse");
+
+const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
+
+const uploadDir = path.join(__dirname, "..", "uploads");
+const docCachePath = path.join(uploadDir, "documents-cache.json");
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+let inMemoryDocCache = [];
+let lastCacheSync = 0;
+
+function sanitizeText(text = "") {
+  if (typeof text !== "string") return "";
+  return removeMd(text.replace(CITATION_REGEX, "")).trim();
+}
+
+function formatExcerpt(raw = "") {
+  const clean = sanitizeText(raw).replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length > 400 ? `${clean.slice(0, 397)}…` : clean;
+}
+
+function normalizeDocForCache(row = {}) {
+  const content = sanitizeText(row.content || "");
+  if (!content) return null;
+
+  return {
+    id: row.id,
+    title: row.title || "Documento",
+    filename: row.filename || null,
+    source_url: row.source_url || null,
+    content,
+    contentLower: content.toLowerCase(),
+  };
+}
+
+async function refreshDocumentCacheFromDb(force = false) {
+  if (!force && Date.now() - lastCacheSync < CACHE_TTL_MS && inMemoryDocCache.length) {
+    return inMemoryDocCache;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT id, title, filename, source_url, content
+       FROM documents
+       ORDER BY upload_date DESC
+       LIMIT 200`
+  );
+
+  const normalized = rows
+    .map(normalizeDocForCache)
+    .filter(Boolean);
+
+  inMemoryDocCache = normalized;
+  lastCacheSync = Date.now();
+
+  try {
+    await fsp.mkdir(uploadDir, { recursive: true });
+    await fsp.writeFile(
+      docCachePath,
+      JSON.stringify({ updatedAt: new Date().toISOString(), docs: normalized }),
+      "utf8"
+    );
+  } catch (cacheErr) {
+    console.warn("⚠️  No se pudo actualizar el caché local de documentos:", cacheErr.message);
+  }
+
+  return inMemoryDocCache;
+}
+
+async function loadDocumentsFromCache() {
+  if (inMemoryDocCache.length) return inMemoryDocCache;
+
+  try {
+    const raw = await fsp.readFile(docCachePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.docs)) {
+      inMemoryDocCache = parsed.docs
+        .map((doc) => ({
+          ...doc,
+          content: sanitizeText(doc.content || ""),
+          contentLower: sanitizeText(doc.content || "").toLowerCase(),
+        }))
+        .filter((doc) => doc.content);
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.warn("⚠️  No se pudo leer el caché de documentos:", err.message);
+    }
+    inMemoryDocCache = [];
+  }
+
+  return inMemoryDocCache;
+}
+
+function buildExcerptFromContent(content = "", queryTokens = []) {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const lower = normalized.toLowerCase();
+  let matchIndex = -1;
+  let matchLength = 0;
+
+  for (const token of queryTokens) {
+    if (!token) continue;
+    const idx = lower.indexOf(token);
+    if (idx !== -1 && (matchIndex === -1 || idx < matchIndex)) {
+      matchIndex = idx;
+      matchLength = token.length;
+    }
+  }
+
+  if (matchIndex === -1) {
+    return normalized.slice(0, 400);
+  }
+
+  const start = Math.max(0, matchIndex - 200);
+  const end = Math.min(normalized.length, matchIndex + matchLength + 200);
+  return normalized.slice(start, end);
+}
+
+async function retrieveFromCache(query = "") {
+  const docs = await loadDocumentsFromCache();
+  if (!docs.length) return [];
+
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+
+  return docs
+    .map((doc) => {
+      let score = 0;
+      for (const token of tokens) {
+        if (!token) continue;
+        if (doc.title.toLowerCase().includes(token)) score += 3;
+        if (doc.contentLower.includes(token)) {
+          const occurrences = doc.contentLower.split(token).length - 1;
+          score += Math.min(occurrences, 5);
+        }
+      }
+
+      const excerpt = buildExcerptFromContent(doc.content, tokens);
+
+      return {
+        id: doc.id,
+        title: doc.title,
+        filename: doc.filename,
+        source_url: doc.source_url || null,
+        excerpt,
+        score,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
 
 const router = express.Router();
 
@@ -12,7 +167,7 @@ const router = express.Router();
 if (!process.env.GEMINI_API_KEY) {
   throw new Error("GEMINI_API_KEY is not configured");
 }
-const genAI = new GoogleGenAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const generationConfig = {
   temperature: 0.2,
@@ -84,29 +239,43 @@ router.post("/chatbot", async (req, res) => {
 
     // 2) Normaliza fuentes (URL usable)
     const origin = process.env.BACKEND_ORIGIN || "http://localhost:5000";
-    const sources = docs.map(d => ({
-      id: d.id,
-      title: d.title || "Documento",
-      // si hay source_url úsala; si no, sirve el PDF local
-      url: d.source_url || `${origin}/uploads/${d.filename}`,
-      page: null
-    }));
+    const sources = docs.map(d => {
+      const fallbackUrl = d.filename ? `${origin}/uploads/${d.filename}` : null;
+      return {
+        id: d.id,
+        title: d.title || "Documento",
+        // si hay source_url úsala; si no, intenta servir el PDF local si existe
+        url: d.source_url || fallbackUrl,
+        page: null,
+        excerpt: formatExcerpt(d.excerpt),
+      };
+    });
 
     // 3) Arma bloques de contexto para el prompt
     const contextBlocks = docs.map(d => ({
       title: d.title || "Documento",
-      excerpt: d.excerpt || ""
+      excerpt: formatExcerpt(d.excerpt) || ""
     }));
 
     // 4) Llama a Gemini con historial
     const aiResponse = await runChat({ query, contextBlocks, history });
 
     // 5) Guarda en BD (opcional guarda el modo de recuperación)
-    await pool.query(
-      `INSERT INTO requests (user_id, query, response, context, created_at, model)
-       VALUES ($1,$2,$3,$4,NOW(),$5)`,
-      [1, query, aiResponse, contextBlocks.map((b,i)=>`[#${i+1}] ${b.title}`).join(" | "), "gemini-1.0-pro/"+mode]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO requests (user_id, query, response, context, created_at, model)
+         VALUES ($1,$2,$3,$4,NOW(),$5)`,
+        [
+          1,
+          query,
+          aiResponse,
+          contextBlocks.map((b, i) => `[#${i + 1}] ${b.title}`).join(" | "),
+          "gemini-1.0-pro/" + mode,
+        ]
+      );
+    } catch (persistErr) {
+      console.warn("⚠️  No se pudo registrar la solicitud en la BD:", persistErr.message);
+    }
 
     return res.json({ answer: aiResponse, sources });
 
@@ -177,42 +346,51 @@ router.post("/log", async (req, res) => {
 });
 
 async function retrieveContext(query) {
-  // 1) Full text (español + unaccent)
-  const ft = await pool.query(`
-    SELECT id, title, filename, source_url,
-           ts_rank(to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))),
-                   websearch_to_tsquery('spanish', unaccent($1))) AS score,
-           substring(content for 1500) AS excerpt
-    FROM documents
-    WHERE to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,'')))
-          @@ websearch_to_tsquery('spanish', unaccent($1))
-    ORDER BY score DESC
-    LIMIT 3
-  `, [query]);
+  try {
+    await refreshDocumentCacheFromDb();
 
-  if (ft.rows.length > 0) return { docs: ft.rows, mode: 'fulltext' };
+    // 1) Full text (español + unaccent)
+    const ft = await pool.query(`
+      SELECT id, title, filename, source_url,
+             ts_rank(to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))),
+                     websearch_to_tsquery('spanish', unaccent($1))) AS score,
+             substring(content for 1500) AS excerpt
+      FROM documents
+      WHERE to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,'')))
+            @@ websearch_to_tsquery('spanish', unaccent($1))
+      ORDER BY score DESC
+      LIMIT 3
+    `, [query]);
 
-  // 2) Fallback: trigram por título/contenido
-  const tg = await pool.query(`
-    SELECT id, title, filename, source_url,
-           greatest(similarity(title, $1), similarity(content, $1)) AS score,
-           substring(content for 1500) AS excerpt
-    FROM documents
-    ORDER BY score DESC
-    LIMIT 3
-  `, [query]);
-  if (tg.rows.length > 0 && (tg.rows[0].score ?? 0) > 0.1) return { docs: tg.rows, mode: 'trigram' };
+    if (ft.rows.length > 0) return { docs: ft.rows, mode: "fulltext" };
 
-  // 3) Fallback final: más recientes
-  const recent = await pool.query(`
-    SELECT id, title, filename, source_url,
-           0 AS score,
-           substring(content for 1500) AS excerpt
-    FROM documents
-    ORDER BY upload_date DESC
-    LIMIT 3
-  `);
-  return { docs: recent.rows, mode: 'recent' };
+    // 2) Fallback: trigram por título/contenido
+    const tg = await pool.query(`
+      SELECT id, title, filename, source_url,
+             greatest(similarity(title, $1), similarity(content, $1)) AS score,
+             substring(content for 1500) AS excerpt
+      FROM documents
+      ORDER BY score DESC
+      LIMIT 3
+    `, [query]);
+    if (tg.rows.length > 0 && (tg.rows[0].score ?? 0) > 0.1) return { docs: tg.rows, mode: "trigram" };
+
+    // 3) Fallback final: más recientes
+    const recent = await pool.query(`
+      SELECT id, title, filename, source_url,
+             0 AS score,
+             substring(content for 1500) AS excerpt
+      FROM documents
+      ORDER BY upload_date DESC
+      LIMIT 3
+    `);
+    if (recent.rows.length > 0) return { docs: recent.rows, mode: "recent" };
+  } catch (dbErr) {
+    console.warn("⚠️  Búsqueda en BD falló, se usará el almacenamiento local:", dbErr.message);
+  }
+
+  const fallbackDocs = await retrieveFromCache(query);
+  return { docs: fallbackDocs, mode: fallbackDocs.length ? "cache" : "cache-empty" };
 }
 
 module.exports = router;

@@ -9,9 +9,12 @@
 .bubble { max-width:680px; padding:12px 14px; border-radius:14px; line-height:1.5; box-shadow:0 1px 2px rgba(0,0,0,.05); }
 .msgUser .bubble { background:#e3f2fd; }
 .msgBot  .bubble { background:#ffffff; border:1px solid #eee; }
-.sources { margin-top:8px; font-size:12px; color:#666; }
-.chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
-.chip { display:inline-block; border:1px solid #ddd; border-radius:999px; padding:2px 8px; text-decoration:none; color:#333; background:#fff; }
+.sources { margin-top:8px; font-size:12px; color:#666; display:flex; flex-direction:column; gap:6px; }
+.sourceList { display:flex; flex-direction:column; gap:8px; }
+.sourceCard { border:1px solid #e0e0e0; border-radius:10px; padding:8px 10px; background:#f9f9ff; }
+.sourceTitle { font-weight:600; color:#3949ab; text-decoration:none; display:inline-block; margin-bottom:4px; }
+.sourceTitle:hover { text-decoration:underline; }
+.sourceExcerpt { margin:0; color:#444; font-size:12px; line-height:1.4; white-space:pre-wrap; }
 
 .inputBar { gap:8px; display:flex; padding:10px; border-top:1px solid #eee; background:#fff; }
 .inputBar textarea { flex:1; resize:none; padding:10px; border:1px solid #ddd; border-radius:10px; }
