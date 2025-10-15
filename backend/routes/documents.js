@@ -88,10 +88,38 @@ router.post('/upload', upload.single('document'), async (req, res) => {
     const pdfInfo = await pdfParse(pdfData);
     const extractedText = (pdfInfo.text || '').trim();
 
-    const result = await pool.query(
-      `INSERT INTO documents (title, content, uploaded_by, filename) VALUES ($1, $2, $3, $4) RETURNING id, title, upload_date, filename`,
-      [req.body.title || req.file.originalname, extractedText, req.body.uploaded_by || 'Anónimo', req.file.filename]
-    );
+    let result;
+    try {
+      result = await pool.query(
+        `INSERT INTO documents (title, content, uploaded_by, filename, source_url)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, title, upload_date, filename, source_url`,
+        [
+          req.body.title || req.file.originalname,
+          extractedText,
+          req.body.uploaded_by || 'Anónimo',
+          req.file.filename,
+          req.body.source_url || null
+        ]
+      );
+    } catch (err) {
+      // Si alguien no migró, cae aquí por columna inexistente: reintenta sin source_url
+      if (String(err.code) === "42703") {
+        result = await pool.query(
+          `INSERT INTO documents (title, content, uploaded_by, filename)
+          VALUES ($1, $2, $3, $4)
+          RETURNING id, title, upload_date, filename`,
+          [
+            req.body.title || req.file.originalname,
+            extractedText,
+            req.body.uploaded_by || 'Anónimo',
+            req.file.filename
+          ]
+        );
+      } else {
+        throw err;
+      }
+    }
 
     res.status(201).json({ success: true, document: result.rows[0] });
   } catch (error) {

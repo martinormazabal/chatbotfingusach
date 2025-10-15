@@ -167,7 +167,20 @@ const router = express.Router();
 if (!process.env.GEMINI_API_KEY) {
   throw new Error("GEMINI_API_KEY is not configured");
 }
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const GEMINI_MODEL = "gemini-2.0-flash";
+const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+const MODEL_FALLBACKS = Array.from(
+  new Set(
+    [
+      GEMINI_MODEL,
+      "gemini-2.0-pro",
+      "gemini-2.0-flash-lite",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
+    ].filter(Boolean)
+  )
+);
 
 const generationConfig = {
   temperature: 0.2,
@@ -183,7 +196,7 @@ const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-async function runChat({ query, contextBlocks, history }) {
+async function tryChatWithModel(modelName, { query, contextBlocks, history }) {
   // Construye historial para Gemini (user/model). Manténlo corto (máx. 6–8 turnos previos).
   const trimmedHistory = (history || []).slice(-8).map(h => ({
     role: h.role === "user" ? "user" : "model",
@@ -191,7 +204,7 @@ async function runChat({ query, contextBlocks, history }) {
   }));
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.0-pro",
+    model: modelName,
     generationConfig,
     safetySettings
   });
@@ -225,7 +238,55 @@ Responde en español, claro y breve. Incluye “Pasos sugeridos” cuando apliqu
 
   const prompt = `CONTEXTO:\n${contextText}\n\nPREGUNTA:\n${query}`;
   const result = await chat.sendMessage(prompt);
-  return result.response.text();
+  const text = result?.response?.text?.();
+  if (!text) {
+    throw new Error("El modelo no entregó contenido utilizable");
+  }
+
+  return { text, modelName };
+}
+
+function isModelNotFoundError(err) {
+  if (!err) return false;
+  if (err.status === 404) return true;
+  const message = String(err.message || err.toString() || "").toLowerCase();
+  return message.includes("not found") || message.includes("no model") || message.includes("unavailable");
+}
+
+async function runChat(options) {
+  if (!genAI) {
+    throw new Error(
+      "El servicio de Gemini no está configurado. Define GEMINI_API_KEY en el backend."
+    );
+  }
+  let lastErr = null;
+
+  for (const candidate of MODEL_FALLBACKS) {
+    if (!candidate) continue;
+
+    try {
+      const response = await tryChatWithModel(candidate, options);
+      if (candidate !== GEMINI_MODEL) {
+        console.info(`ℹ️  Gemini respondió con el modelo alternativo "${candidate}".`);
+      }
+      return response;
+    } catch (err) {
+      if (!isModelNotFoundError(err)) {
+        throw err;
+      }
+
+      lastErr = err;
+      console.warn(
+        `⚠️  El modelo "${candidate}" no está disponible, intentando con otra versión...`
+      );
+    }
+  }
+
+  if (lastErr) {
+    throw lastErr;
+  }
+
+  throw new Error("No se pudo inicializar ningún modelo de Gemini disponible");
 }
 
 // Endpoint /chatbot
@@ -239,13 +300,15 @@ router.post("/chatbot", async (req, res) => {
 
     // 2) Normaliza fuentes (URL usable)
     const origin = process.env.BACKEND_ORIGIN || "http://localhost:5000";
+    const appOrigin = process.env.APP_ORIGIN || process.env.FRONTEND_URL || "http://localhost:3000";
     const sources = docs.map(d => {
       const fallbackUrl = d.filename ? `${origin}/uploads/${d.filename}` : null;
+      const documentRoute = d.id ? `${appOrigin.replace(/\/$/, "")}/documents/${d.id}` : null;
       return {
         id: d.id,
         title: d.title || "Documento",
-        // si hay source_url úsala; si no, intenta servir el PDF local si existe
-        url: d.source_url || fallbackUrl,
+        // si hay source_url úsala; si no, intenta servir el PDF local si existe; como último recurso apunta al detalle interno
+        url: d.source_url || fallbackUrl || documentRoute,
         page: null,
         excerpt: formatExcerpt(d.excerpt),
       };
@@ -258,7 +321,11 @@ router.post("/chatbot", async (req, res) => {
     }));
 
     // 4) Llama a Gemini con historial
-    const aiResponse = await runChat({ query, contextBlocks, history });
+    const { text: aiResponse, modelName: resolvedModel } = await runChat({
+      query,
+      contextBlocks,
+      history,
+    });
 
     // 5) Guarda en BD (opcional guarda el modo de recuperación)
     try {
@@ -270,18 +337,22 @@ router.post("/chatbot", async (req, res) => {
           query,
           aiResponse,
           contextBlocks.map((b, i) => `[#${i + 1}] ${b.title}`).join(" | "),
-          "gemini-1.0-pro/" + mode,
+          `${resolvedModel || GEMINI_MODEL}/${mode}`,
         ]
       );
     } catch (persistErr) {
       console.warn("⚠️  No se pudo registrar la solicitud en la BD:", persistErr.message);
     }
 
-    return res.json({ answer: aiResponse, sources });
+    return res.json({ answer: aiResponse, sources, model: resolvedModel || GEMINI_MODEL });
 
   } catch (err) {
     console.error("❌ /chatbot:", err);
-    return res.status(500).json({ error: err.message || "Query Error" });
+    const friendly =
+      err.status === 404
+        ? "El modelo configurado no está disponible. Verifica el nombre en GEMINI_MODEL o consulta la consola de Google AI Studio."
+        : err.message || "Query Error";
+    return res.status(500).json({ error: friendly });
   }
 });
 
@@ -351,7 +422,7 @@ async function retrieveContext(query) {
 
     // 1) Full text (español + unaccent)
     const ft = await pool.query(`
-      SELECT id, title, filename, source_url,
+      SELECT id, title, filename, NULL::text AS source_url,
              ts_rank(to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))),
                      websearch_to_tsquery('spanish', unaccent($1))) AS score,
              substring(content for 1500) AS excerpt
@@ -366,23 +437,25 @@ async function retrieveContext(query) {
 
     // 2) Fallback: trigram por título/contenido
     const tg = await pool.query(`
-      SELECT id, title, filename, source_url,
-             greatest(similarity(title, $1), similarity(content, $1)) AS score,
-             substring(content for 1500) AS excerpt
+      SELECT id, title, filename,
+        COALESCE(source_url, NULL)::text AS source_url,
+        greatest(similarity(title, $1), similarity(content, $1)) AS score,
+        substring(content for 1500) AS excerpt
       FROM documents
       ORDER BY score DESC
-      LIMIT 3
+      LIMIT 3;
     `, [query]);
     if (tg.rows.length > 0 && (tg.rows[0].score ?? 0) > 0.1) return { docs: tg.rows, mode: "trigram" };
 
     // 3) Fallback final: más recientes
     const recent = await pool.query(`
-      SELECT id, title, filename, source_url,
-             0 AS score,
-             substring(content for 1500) AS excerpt
+      SELECT id, title, filename,
+        COALESCE(source_url, NULL)::text AS source_url,
+        0 AS score,
+        substring(content for 1500) AS excerpt
       FROM documents
       ORDER BY upload_date DESC
-      LIMIT 3
+      LIMIT 3;
     `);
     if (recent.rows.length > 0) return { docs: recent.rows, mode: "recent" };
   } catch (dbErr) {
