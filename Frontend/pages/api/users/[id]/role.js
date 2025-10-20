@@ -1,6 +1,8 @@
+import { resolveBackendBaseUrl } from "../../../lib/backend-url";
+
 export default async function handler(req, res) {
   const { id } = req.query;
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+  const backendUrl = resolveBackendBaseUrl(req);
 
   try {
     const response = await fetch(`${backendUrl}/api/users/${id}/role`, {
@@ -18,9 +20,9 @@ export default async function handler(req, res) {
     
   } catch (error) {
     console.error("API Gateway Error:", error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       message: "Error de comunicación con el servidor",
-      error: error.message 
+      error: error.message
     });
   }
 }

@@ -1,10 +1,19 @@
+process.on('unhandledRejection', (reason, p) => {
+  console.error('🧯 Unhandled Rejection en promesa:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('🧯 Uncaught Exception:', err);
+});
+
 const express = require("express");
 const cors = require("cors");
-const fs = require('fs'); // Importar el módulo fs
-require('dotenv').config();
-const pool = require('./db');
-const { execSync } = require('child_process');
-const path = require('path');
+const fs = require("fs"); // Importar el módulo fs
+const path = require("path");
+
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
+
+const pool = require("./db");
+const { execSync } = require("child_process");
 const removeMd = require('remove-markdown');
 const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
 
@@ -80,6 +89,22 @@ const initialize = async () => {
 
     // 3. Iniciar servidor Express
     const app = express();
+
+    app.get('/api/healthz', async (req, res) => {
+      const status = {
+        up: true,
+        geminiKey: !!process.env.GEMINI_API_KEY,
+      };
+      try {
+        await pool.query('SELECT 1');
+        status.db = true;
+      } catch (e) {
+        status.db = false;
+        status.dbError = e.message;
+      }
+      res.json(status);
+    });
+
     const uploadDir = path.join(__dirname, 'uploads');
     // Middlewares
     app.use(cors({

@@ -87,20 +87,24 @@ export default function Chat() {
 
       const followUp =
         sources.length > 0
-          ? `Se encontraron ${sources.length} fuente${sources.length > 1 ? "s" : ""} verificadas.`
+          ? `Se encontraron ${sources.length} fuente${sources.length > 1 ? "s" : "" } verificadas.`
           : "No se hallaron fuentes directas. Puedes revisar documentos recientes manualmente.";
       setStatus({ type: sources.length ? "success" : "warning", message: followUp });
     } catch (e) {
-      console.error("Chatbot error", e);
+      console.error("--- INICIO DE ERROR DETALLADO DEL CHATBOT ---");
+      console.error("Error completo:", e);
+      console.error("Mensaje de error:", e.message);
+      console.error("Stack de error:", e.stack);
+      console.error("--- FIN DE ERROR DETALLADO DEL CHATBOT ---");
       const message =
         e?.message?.includes("modelo")
           ? "No pudimos conectar con el modelo configurado. Verifica la configuración técnica."
           : e?.message || "Error inesperado. Intenta de nuevo.";
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: message, sources: [] },
+        { role: "assistant", text: `Hubo un problema: ${message}. Revisa la consola para más detalles.`, sources: [] },
       ]);
-      setStatus({ type: "error", message: message });
+      setStatus({ type: "error", message: "Error en la comunicación con el chatbot. Revisa la consola." });
     } finally {
       setSending(false);
     }
@@ -133,7 +137,7 @@ export default function Chat() {
       : status.type === "success"
       ? styles.statusSuccess
       : ""
-  }`;
+  }`
 
   return (
     <div className={styles.shell}>

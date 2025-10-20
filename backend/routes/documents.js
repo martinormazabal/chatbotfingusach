@@ -2,11 +2,9 @@ const express = require("express");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
 const path = require("path");
-const { createWorker } = require("tesseract.js");
 const pool = require("../db");
 const fs = require("fs").promises;
 const { v4: uuidv4 } = require("uuid");
-const { fromPath } = require("pdf2pic");
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', 'uploads');
@@ -25,9 +23,11 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// FIX: Correctly handle OCR by converting PDF to an image first.
 async function enhancedOCRProcessing(filePath, originalFilename) {
   let worker;
+  const { fromPath } = require("pdf2pic");
+  const { createWorker } = require("tesseract.js");
+
   const options = {
     density: 300,
     saveFilename: `${path.parse(originalFilename).name}_${uuidv4()}`,
@@ -134,8 +134,11 @@ router.post('/upload', upload.single('document'), async (req, res) => {
 
 // New route to run OCR on-demand.
 router.post('/:id/run-ocr', async (req, res) => {
-  const { id } = req.params;
   try {
+    const { createWorker } = await import('tesseract.js'); // o requiere aquí
+    const { fromPath } = require("pdf2pic");
+
+    const { id } = req.params;
     const docResult = await pool.query('SELECT filename FROM documents WHERE id = $1', [id]);
     if (docResult.rowCount === 0) {
       return res.status(404).json({ error: 'Documento no encontrado' });
@@ -155,12 +158,8 @@ router.post('/:id/run-ocr', async (req, res) => {
         message: 'OCR procesado y guardado correctamente.',
         content: updatedDoc.rows[0].content
     });
-  } catch (error) {
-    console.error(`Error en la ruta /run-ocr para ID ${id}: ${error.stack}`);
-    res.status(500).json({
-      error: 'Falló el procesamiento OCR',
-      details: error.message || 'Ocurrió un error desconocido.'
-    });
+  } catch (e) {
+    return res.status(500).json({ error: 'OCR no disponible en este entorno', details: e.message });
   }
 });
 
