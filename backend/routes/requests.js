@@ -158,8 +158,10 @@ if (GEMINI_API_KEY) {
 
 // 3.2) Lista de modelos viables (sólo los que sabes que tu cuenta soporta)
 const MODEL_FALLBACKS = [
-  "gemini-1.5-flash-latest",
-  "gemini-pro",
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-pro-exp",
 ].filter(Boolean);
 
 const generationConfig = {

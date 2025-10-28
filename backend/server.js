@@ -34,48 +34,67 @@ const dataDir = path.resolve(__dirname, '../database/local');
 const logFile = path.resolve(__dirname, '../database/local/logfile');
 const socketDir = '/tmp/pgsocket';
 
-let isRunning;
+let pgCtlAvailable = false;
 
-// Configuración inicial
+//Configuración inicial
 try {
-  // Verificar si el directorio de datos existe
-  if (!fs.existsSync(dataDir)) {
-    console.log(`📁 Directorio de datos no encontrado. Creando: ${dataDir}`);
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  // Verificar estado de PostgreSQL
-  execSync(`pg_ctl status -D ${dataDir}`, { stdio: 'ignore' });
-  isRunning = true;
+  execSync('pg_ctl --version', { stdio: 'ignore' });
+  pgCtlAvailable = true;
 } catch (err) {
-  if (err.status === 3) {
-    isRunning = false;
-  } else {
-    console.error('Error verificando estado de PostgreSQL:', err);
-    process.exit(1);
+  console.warn('⚠️  pg_ctl no está disponible en el PATH. Se omitirá la autogestión de PostgreSQL.');
+}
+
+let isRunning = null;
+
+if (pgCtlAvailable) {
+  let isRunning;
+
+  try {
+    if (!fs.existsSync(dataDir)) {
+      console.log(`📁 Directorio de datos no encontrado. Creando: ${dataDir}`);
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    execSync(`pg_ctl status -D ${dataDir}`, { stdio: 'ignore' });
+    isRunning = true;
+  } catch (err) {
+    if (err?.status === 3) {
+      isRunning = false;
+    } else {
+      console.error('⚠️  No se pudo verificar el estado de PostgreSQL con pg_ctl:', err.message || err);
+      isRunning = null;
+    }
   }
-}
-if (!isRunning) {
-  console.log('🔄 PostgreSQL no está en ejecución. Iniciando...');
-  // Crea el directorio para el socket
-  execSync(`mkdir -p ${socketDir}`,    { stdio: 'inherit' });
-  execSync(`chmod 777 ${socketDir}`,    { stdio: 'inherit' });
 
-  // Arranca PostgreSQL con pg_ctl y espera (-w)
-  execSync(
-    `pg_ctl \
-      -D ${dataDir} \
-      -l ${logFile} \
-      start -w \
-      -o "-c listen_addresses='localhost' \
-          -c port=5432 \
-          -c unix_socket_directories='${socketDir}'"`,
-    { stdio: 'inherit' }
-  );
-
-  console.log('✅ PostgreSQL iniciado');
+  if (isRunning === false) {
+    try {
+      console.log('🔄 PostgreSQL no está en ejecución. Iniciando...');
+      execSync(`mkdir -p ${socketDir}`, { stdio: 'inherit' });
+      execSync(`chmod 777 ${socketDir}`, { stdio: 'inherit' });
+      execSync(
+        `pg_ctl \
+          -D ${dataDir} \
+          -l ${logFile} \
+          start -w \
+          -o "-c listen_addresses='localhost' \
+              -c port=5432 \
+              -c unix_socket_directories='${socketDir}'"`,
+        { stdio: 'inherit' }
+      );
+      console.log('✅ PostgreSQL iniciado');
+      isRunning = true;
+    } catch (startErr) {
+      console.error('❌ No se pudo iniciar PostgreSQL con pg_ctl:', startErr.message || startErr);
+    }
+  } else if (isRunning) {
+    console.log('✔️ PostgreSQL ya está en ejecución');
+  } else {
+    console.log('ℹ️  Continuando sin gestión automática de PostgreSQL. Asegúrate de que el servicio esté disponible.');
+  }
 } else {
-  console.log('✔️ PostgreSQL ya está en ejecución');
+  console.log('ℹ️  Continuando sin gestión automática de PostgreSQL. Se asumirá que la base de datos está gestionada externamente.');
 }
+
+const INIT_RETRY_DELAY_MS = 5000;
 
 const initialize = async () => {
   try {
@@ -110,12 +129,9 @@ const initialize = async () => {
     app.use(cors({
       origin: process.env.FRONTEND_URL || "http://localhost:3000",
     }));
-    app.use(
-      '/uploads',
-      express.static(uploadDir)); //:contentReference[oaicite:0]{index=0}
+    app.use('/uploads', express.static(uploadDir));
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
-    app.use(cors(/*…*/));
 
     // Rutas
     app.use("/api/users", require('./routes/users')); // Asegúrate que la ruta sea correcta
@@ -135,8 +151,9 @@ const initialize = async () => {
     });
 
   } catch (error) {
-    console.error('❌ Error de inicialización:', error.message);
-    process.exit(1);  // Salir con código de error
+    console.error('❌ Error de inicialización:', error?.message || error);
+    console.log(`⏳ Reintentando inicialización en ${INIT_RETRY_DELAY_MS / 1000}s…`);
+    setTimeout(initialize, INIT_RETRY_DELAY_MS);
   }
 };
 
