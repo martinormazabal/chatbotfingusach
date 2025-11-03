@@ -84,9 +84,39 @@ router.post('/upload', upload.single('document'), async (req, res) => {
   }
 
   try {
-    const pdfData = await fs.readFile(req.file.path);
-    const pdfInfo = await pdfParse(pdfData);
-    const extractedText = (pdfInfo.text || '').trim();
+    let extractedText = '';
+    const ocrMetadata = {
+      attempted: false,
+      succeeded: false,
+      message: ''
+    };
+
+    try {
+      const pdfData = await fs.readFile(req.file.path);
+      const pdfInfo = await pdfParse(pdfData);
+      extractedText = (pdfInfo.text || '').trim();
+      if (extractedText) {
+        ocrMetadata.message = 'Se detectó texto incrustado en el PDF. No fue necesario ejecutar OCR.';
+        ocrMetadata.succeeded = true;
+      }
+    } catch (parseError) {
+      console.warn('Fallo al extraer texto incrustado con pdf-parse. Se intentará OCR.', parseError);
+    }
+
+    if (!extractedText) {
+      ocrMetadata.attempted = true;
+      try {
+        extractedText = (await enhancedOCRProcessing(req.file.path, req.file.originalname)).trim();
+        ocrMetadata.succeeded = extractedText.length > 0;
+        ocrMetadata.message = ocrMetadata.succeeded
+          ? 'Texto extraído correctamente mediante OCR.'
+          : 'OCR finalizó, pero no se encontró texto legible en el documento.';
+      } catch (ocrError) {
+        console.error('Error ejecutando OCR durante la subida del documento:', ocrError);
+        ocrMetadata.succeeded = false;
+        ocrMetadata.message = 'No fue posible extraer texto automáticamente. Puede ejecutar el OCR manualmente desde la interfaz.';
+      }
+    }
 
     let result;
     try {
@@ -121,7 +151,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
       }
     }
 
-    res.status(201).json({ success: true, document: result.rows[0] });
+    res.status(201).json({ success: true, document: result.rows[0], ocr: ocrMetadata });
   } catch (error) {
     console.error(`Error en la ruta de subida: ${error.stack}`);
     await fs.unlink(req.file.path).catch(e => console.error("Error al limpiar archivo temporal después de un error:", e));

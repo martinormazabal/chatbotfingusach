@@ -12,6 +12,7 @@ export default function DocumentsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const EMPTY_CONTENT_MESSAGE = 'No hay contenido disponible todavía. Utiliza "Procesar OCR" para intentar extraerlo.';
 
   async function fetchDocuments() {
     try {
@@ -38,7 +39,7 @@ export default function DocumentsPage() {
       setCurrentContent('');
     } else {
       // The content is now loaded initially with the document list.
-      setCurrentContent(doc.content || 'No hay contenido para mostrar.');
+      setCurrentContent(doc.content?.trim() ? doc.content : EMPTY_CONTENT_MESSAGE);
       setExpandedId(doc.id);
     }
   };
@@ -56,7 +57,7 @@ export default function DocumentsPage() {
       // If the processed document is expanded, update its content view
       if (expandedId === id) {
         const updatedDoc = res.data.content;
-        setCurrentContent(updatedDoc || 'No hay contenido para mostrar.');
+        setCurrentContent(updatedDoc?.trim() ? updatedDoc : EMPTY_CONTENT_MESSAGE);
       }
     } catch (err) {
       console.error("Error running OCR:", err);
@@ -141,6 +142,11 @@ export default function DocumentsPage() {
                 </div>
               </div>
               <p className="text-sm text-gray-500">Subido por: {doc.uploaded_by} el {doc.upload_date}</p>
+              {(!doc.content || !doc.content.trim()) && (
+                <p className="text-sm text-yellow-700 mt-2">
+                  No se ha extraído texto de este documento aún. Usa el botón "Procesar OCR" para intentarlo.
+                </p>
+              )}
               {expandedId === doc.id && (
                 <div className="mt-2 p-2 bg-gray-100 rounded overflow-auto max-h-60">
                   {isLoadingContent ? <p>Cargando...</p> : <p className="whitespace-pre-wrap">{currentContent}</p>}

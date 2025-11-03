@@ -1,5 +1,6 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const pool = require("../db");
 const nodemailer = require("nodemailer");
 require("dotenv").config();
@@ -7,70 +8,218 @@ require("dotenv").config();
 const router = express.Router();
 
 // Configurar nodemailer para enviar correos
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const EMAIL_ENABLED = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+const transporter = EMAIL_ENABLED
+  ? nodemailer.createTransport({
+      service: process.env.EMAIL_SERVICE || "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    })
+  : null;
+
+const PASSWORD_RESET_TOKEN_TTL_MINUTES = parseInt(
+  process.env.PASSWORD_RESET_TOKEN_TTL_MINUTES,
+  10
+);
+
+const PASSWORD_RESET_TTL = Number.isFinite(PASSWORD_RESET_TOKEN_TTL_MINUTES)
+  ? PASSWORD_RESET_TOKEN_TTL_MINUTES
+  : 60; // 1 hora por defecto
+
+const VALID_ROLES = [
+  "estudiante",
+  "funcionario",
+  "administrador de documentos",
+  "admin",
+];
+
+const PASSWORD_POLICY = {
+  minLength: 10,
+  minLowercase: 1,
+  minUppercase: 1,
+  minDigits: 1,
+  minSymbols: 1,
+};
+
+const passwordRegex = new RegExp(
+  `^(?=(?:.*[a-z]){${PASSWORD_POLICY.minLowercase},})(?=(?:.*[A-Z]){${PASSWORD_POLICY.minUppercase},})(?=(?:.*\\d){${PASSWORD_POLICY.minDigits},})(?=(?:.*[^A-Za-z\\d]){${PASSWORD_POLICY.minSymbols},}).{${PASSWORD_POLICY.minLength},}$`
+);
+
+function validatePasswordStrength(password) {
+  return passwordRegex.test(password || "");
+}
+
+async function upsertPasswordResetToken(userId, tokenHash, client) {
+  const db = client || pool;
+  await db.query(
+    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, consumed_at)
+     VALUES ($1, $2, NOW() + make_interval(mins => $3), NULL)
+     ON CONFLICT (user_id)
+     DO UPDATE SET token_hash = EXCLUDED.token_hash,
+                   expires_at = EXCLUDED.expires_at,
+                   consumed_at = NULL,
+                   updated_at = NOW()` ,
+    [userId, tokenHash, PASSWORD_RESET_TTL]
+  );
+}
+
+function buildEmailTransportFallbackMessage(to, subject, body) {
+  return `\n--- EMAIL NO ENVIADO (configuración ausente) ---\nPara: ${to}\nAsunto: ${subject}\n${body}\n----------------------------------------------\n`;
+}
+
+async function sendEmailIfEnabled({ to, subject, text }) {
+  if (!EMAIL_ENABLED || !transporter) {
+    console.warn(
+      buildEmailTransportFallbackMessage(to, subject, text)
+    );
+    return;
+  }
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+    to,
+    subject,
+    text,
+  });
+}
+
+function generateTemporaryPassword() {
+  const lowercase = "abcdefghjkmnpqrstuvwxyz";
+  const uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const symbols = "!@#$%^&*-_=+";
+  const all = lowercase + uppercase + digits + symbols;
+
+  const pick = (set) => set[crypto.randomInt(0, set.length)];
+  const passwordChars = [
+    pick(lowercase),
+    pick(uppercase),
+    pick(digits),
+    pick(symbols),
+  ];
+
+  while (passwordChars.length < 16) {
+    passwordChars.push(pick(all));
+  }
+
+  return passwordChars
+    .sort(() => 0.5 - Math.random())
+    .join("");
+}
+
+function sanitizeRole(role) {
+  const normalized = (role || "estudiante").toString().trim().toLowerCase();
+  if (!VALID_ROLES.includes(normalized)) {
+    throw new Error(
+      `Rol no válido. Opciones permitidas: ${VALID_ROLES.join(", ")}`
+    );
+  }
+  return normalized;
+}
+
+async function getUserByEmail(email, client) {
+  const db = client || pool;
+  const result = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+  return result.rows[0] || null;
+}
+
+async function getUserById(id, client) {
+  const db = client || pool;
+  const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
+  return result.rows[0] || null;
+}
+
+async function ensurePasswordResetTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+}
 
 // Endpoint para crear un nuevo usuario
 router.post("/register", async (req, res) => {
   try {
     const { username, email, password, role } = req.body;
 
-    if (!username || !email || !password || !role) {
-      return res.status(400).json({ message: "Todos los campos son obligatorios." });
+    if (!username || !email) {
+      return res
+        .status(400)
+        .json({ message: "Los campos 'username' y 'email' son obligatorios." });
     }
 
-    // Generar salt y hashear la contraseña
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Verificar si el usuario ya existe
-    const userExists = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-    if (userExists.rows.length > 0) {
-      return res.status(400).json({ message: "El usuario ya existe." });
+    let sanitizedRole;
+    try {
+      sanitizedRole = sanitizeRole(role);
+    } catch (roleError) {
+      return res.status(400).json({ message: roleError.message });
     }
 
-    // Insertar usuario en la base de datos
+    const existingUser = await getUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({ message: "El correo ya está registrado." });
+    }
+
+    const finalPassword = password || generateTemporaryPassword();
+    if (!validatePasswordStrength(finalPassword)) {
+      return res.status(400).json({
+        message:
+          "La contraseña no cumple con la política de seguridad (mínimo 10 caracteres, mayúsculas, minúsculas, números y símbolos).",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(finalPassword, 12);
+
     const newUser = await pool.query(
-      "INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING *",
-      [username, email, hashedPassword, role || 'estudiante']
+      `INSERT INTO users (username, email, password_hash, role)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, username, email, role, created_at`,
+      [username.trim(), email.trim().toLowerCase(), hashedPassword, sanitizedRole]
     );
 
-    // Enviar respuesta de éxito al cliente DESPUÉS de insertar en DB
-    res.status(201).json({ message: "Usuario creado exitosamente.", user: newUser.rows[0] });
+    const responsePayload = {
+      message: "Usuario creado exitosamente.",
+      user: {
+        ...newUser.rows[0],
+        hasTemporaryPassword: !password,
+      },
+    };
 
-    // Intentar enviar correo de bienvenida de forma asíncrona DESPUÉS de enviar la respuesta
-    try {
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: email,
-        subject: "Bienvenido al sistema",
-        text: `Hola ${username},
+    res.status(201).json(responsePayload);
+
+    const emailBody = `Hola ${username},
 
 Tu cuenta ha sido creada con éxito.
 Correo: ${email}
-Contraseña: (la que ingresaste)
+${password ? "" : `Contraseña temporal: ${finalPassword}\n`}
+Por tu seguridad, cambia esta contraseña en tu próximo ingreso.
 
 Saludos,
-Administración`,
-      };
-      await transporter.sendMail(mailOptions);
-      console.log("Email de bienvenida enviado a:", email); // Log de éxito
-    } catch (emailError) {
-      console.error("Error al enviar email de bienvenida:", emailError); // Log de error de email
-      // NO enviar respuesta al cliente aquí, ya se envió la respuesta de éxito.
-    }
+Administración`;
 
+    await sendEmailIfEnabled({
+      to: email,
+      subject: "Bienvenido al sistema",
+      text: emailBody,
+    });
   } catch (error) {
-    console.error("Error en el registro de usuario (antes o durante DB insert):", error); // Log de errores de registro (validación o DB)
-    // Este catch maneja errores antes o durante la inserción en la DB.
+    console.error(
+      "Error en el registro de usuario (antes o durante DB insert):",
+      error
+    );
     res.status(500).json({
-      message: error.code === "23505" ? "El correo ya está registrado" : "Error en el servidor",
-      // details: error.message // Opcional: agregar detalles del error en desarrollo
+      message:
+        error.code === "23505"
+          ? "El correo ya está registrado"
+          : "Error en el servidor",
+      details: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });
@@ -94,30 +243,25 @@ router.put("/:id(\d+)/role", async (req, res) => {
       return res.status(400).json({ message: "El campo 'role' es requerido" });
     }
 
-    const role = req.body.role.toString().trim().toLowerCase();
-    // Validación numérica
-    if (isNaN(id)) {
+    if (Number.isNaN(Number(id))) {
       return res.status(400).json({ message: "ID de usuario inválido" });
     }
-    // Validar que el rol sea válido
-    const validRoles = ["estudiante", "funcionario", "administrador de documentos"];
-    if (!validRoles.includes(role)) {
-      return res.status(400).json({ 
-        message: `Rol no válido. Opciones permitidas: ${validRoles.join(", ")}`,
-        receivedRole: req.body.role
-      });
+
+    let sanitizedRole;
+    try {
+      sanitizedRole = sanitizeRole(req.body.role);
+    } catch (roleError) {
+      return res.status(400).json({ message: roleError.message });
     }
 
-    // Verificar si el usuario existe
-    const user = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
-    if (user.rows.length === 0) {
+    const user = await getUserById(parseInt(id, 10));
+    if (!user) {
       return res.status(404).json({ message: "Usuario no encontrado" });
     }
 
-    // Actualizar el rol del usuario
     await pool.query(
       "UPDATE users SET role = $1 WHERE id = $2",
-      [role, parseInt(id, 10)] // Conversión explícita a número
+      [sanitizedRole, user.id]
     );
     /*
     // Enviar correo de notificación al usuario
@@ -134,10 +278,10 @@ Administración.`,
     };
     await transporter.sendMail(mailOptions);
     */
-    res.status(200).json({ 
+    res.status(200).json({
       message: "Perfil actualizado correctamente",
-      previousRole: user.rows[0].role,
-      newRole: role
+      previousRole: user.role,
+      newRole: sanitizedRole
     });
   } catch (error) {
     console.error(`Error actualizando rol: ${error.message}`, {
@@ -148,6 +292,193 @@ Administración.`,
       message: "Error en el servidor",
       details: error.message 
     });
+  }
+});
+
+// Ruta para cambiar la contraseña de un usuario
+router.post("/:id(\d+)/change-password", async (req, res) => {
+  const { id } = req.params;
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({
+      message: "Los campos 'currentPassword' y 'newPassword' son obligatorios.",
+    });
+  }
+
+  if (!validatePasswordStrength(newPassword)) {
+    return res.status(400).json({
+      message:
+        "La nueva contraseña no cumple con la política de seguridad (mínimo 10 caracteres, mayúsculas, minúsculas, números y símbolos).",
+    });
+  }
+
+  try {
+    await ensurePasswordResetTable();
+    const user = await getUserById(parseInt(id, 10));
+    if (!user) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password_hash
+    );
+
+    if (!isCurrentPasswordValid) {
+      return res.status(403).json({ message: "La contraseña actual no es válida" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [
+      hashedPassword,
+      user.id,
+    ]);
+
+    await pool.query(
+      "UPDATE password_reset_tokens SET consumed_at = NOW() WHERE user_id = $1",
+      [user.id]
+    );
+
+    await sendEmailIfEnabled({
+      to: user.email,
+      subject: "Contraseña actualizada",
+      text: `Hola ${user.username},
+
+Tu contraseña ha sido modificada correctamente.
+Si no reconoces este cambio, contacta a soporte de inmediato.
+
+Saludos,
+Administración`,
+    });
+
+    res.status(200).json({ message: "Contraseña actualizada correctamente" });
+  } catch (error) {
+    console.error("Error al cambiar la contraseña:", error);
+    res.status(500).json({ message: "Error en el servidor" });
+  }
+});
+
+router.post("/password-reset/request", async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ message: "El campo 'email' es obligatorio." });
+  }
+
+  try {
+    await ensurePasswordResetTable();
+
+    const user = await getUserByEmail(email.trim().toLowerCase());
+    if (!user) {
+      return res.status(200).json({
+        message:
+          "Si el correo existe en el sistema, se enviarán instrucciones para restablecer la contraseña.",
+      });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = await bcrypt.hash(resetToken, 12);
+    await upsertPasswordResetToken(user.id, tokenHash);
+
+    const resetLink = `${process.env.FRONTEND_RESET_URL || "http://localhost:3000/reset-password"}?token=${resetToken}&email=${encodeURIComponent(
+      user.email
+    )}`;
+
+    await sendEmailIfEnabled({
+      to: user.email,
+      subject: "Solicitud de restablecimiento de contraseña",
+      text: `Hola ${user.username},
+
+Hemos recibido una solicitud para restablecer tu contraseña.
+Si no solicitaste este cambio, ignora este mensaje.
+
+Para continuar, visita el siguiente enlace (válido por ${PASSWORD_RESET_TTL} minutos):
+${resetLink}
+
+Saludos,
+Administración`,
+    });
+
+    res.status(200).json({
+      message:
+        "Si el correo existe en el sistema, se enviarán instrucciones para restablecer la contraseña.",
+    });
+  } catch (error) {
+    console.error("Error al solicitar restablecimiento de contraseña:", error);
+    res.status(500).json({ message: "Error en el servidor" });
+  }
+});
+
+router.post("/password-reset/confirm", async (req, res) => {
+  const { email, token, newPassword } = req.body;
+
+  if (!email || !token || !newPassword) {
+    return res.status(400).json({
+      message: "Los campos 'email', 'token' y 'newPassword' son obligatorios.",
+    });
+  }
+
+  if (!validatePasswordStrength(newPassword)) {
+    return res.status(400).json({
+      message:
+        "La nueva contraseña no cumple con la política de seguridad (mínimo 10 caracteres, mayúsculas, minúsculas, números y símbolos).",
+    });
+  }
+
+  try {
+    const user = await getUserByEmail(email.trim().toLowerCase());
+    if (!user) {
+      return res.status(400).json({ message: "Token inválido o expirado" });
+    }
+
+    await ensurePasswordResetTable();
+
+    const tokenResult = await pool.query(
+      `SELECT * FROM password_reset_tokens
+       WHERE user_id = $1 AND consumed_at IS NULL`,
+      [user.id]
+    );
+
+    const tokenRow = tokenResult.rows[0];
+    if (!tokenRow || new Date(tokenRow.expires_at) < new Date()) {
+      return res.status(400).json({ message: "Token inválido o expirado" });
+    }
+
+    const isTokenValid = await bcrypt.compare(token, tokenRow.token_hash);
+    if (!isTokenValid) {
+      return res.status(400).json({ message: "Token inválido o expirado" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await pool.query("BEGIN");
+    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [
+      hashedPassword,
+      user.id,
+    ]);
+    await pool.query(
+      "UPDATE password_reset_tokens SET consumed_at = NOW(), updated_at = NOW() WHERE id = $1",
+      [tokenRow.id]
+    );
+    await pool.query("COMMIT");
+
+    await sendEmailIfEnabled({
+      to: user.email,
+      subject: "Contraseña restablecida",
+      text: `Hola ${user.username},
+
+Tu contraseña fue restablecida correctamente.
+Si no solicitaste este cambio, comunícate con soporte de inmediato.
+
+Saludos,
+Administración`,
+    });
+
+    res.status(200).json({ message: "La contraseña fue restablecida correctamente" });
+  } catch (error) {
+    await pool.query("ROLLBACK").catch(() => {});
+    console.error("Error al confirmar restablecimiento de contraseña:", error);
+    res.status(500).json({ message: "Error en el servidor" });
   }
 });
 

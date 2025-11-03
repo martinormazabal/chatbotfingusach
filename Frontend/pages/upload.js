@@ -3,13 +3,13 @@ import React, { useState } from 'react';
 export default function DocumentUpload() {
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
-  const [message, setMessage] = useState('');
+    const [feedback, setFeedback] = useState({ type: '', text: '' });
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) {
-      setMessage('Por favor, seleccione un archivo para subir.');
+      setFeedback({ type: 'error', text: 'Por favor, seleccione un archivo para subir.' });
       return;
     }
 
@@ -18,7 +18,7 @@ export default function DocumentUpload() {
     const timeoutId = setTimeout(() => controller.abort(), 300000);
 
     setIsLoading(true);
-    setMessage('Subiendo y procesando el documento... Esto puede tardar varios minutos.');
+    setFeedback({ type: 'info', text: 'Subiendo y procesando el documento... Esto puede tardar varios minutos.' });
 
     try {
       const formData = new FormData();
@@ -47,10 +47,27 @@ export default function DocumentUpload() {
         }
         throw new Error(errorDetails);
       }
-      
-      const result = await response.json();
 
-      setMessage('¡Documento subido y procesado con éxito!');
+      const result = await response.json();
+      if (!result?.success) {
+        throw new Error(result?.error || 'La API no confirmó la subida del documento.');
+      }
+
+      let alertType = 'success';
+      let alertText = '¡Documento subido correctamente!';
+
+      if (result?.ocr?.attempted) {
+        if (result.ocr.succeeded) {
+          alertText = result.ocr.message || 'Documento subido y texto extraído mediante OCR.';
+        } else {
+          alertType = 'warning';
+          alertText = result.ocr.message || 'Documento subido, pero no fue posible extraer texto automáticamente.';
+        }
+      } else if (result?.ocr?.message) {
+        alertText = result.ocr.message;
+      }
+
+      setFeedback({ type: alertType, text: alertText });
       setFile(null);
       setTitle('');
       e.target.reset(); // Resetea el formulario, incluyendo el input de archivo.
@@ -59,9 +76,12 @@ export default function DocumentUpload() {
       clearTimeout(timeoutId);
       
       if (error.name === 'AbortError') {
-        setMessage('⏳ El tiempo de espera ha sido excedido (5 minutos). El archivo podría ser muy grande o el servidor está sobrecargado. Por favor, inténtelo de nuevo.');
+        setFeedback({
+          type: 'warning',
+          text: '⏳ El tiempo de espera ha sido excedido (5 minutos). El archivo podría ser muy grande o el servidor está sobrecargado. Por favor, inténtelo de nuevo.'
+        });
       } else {
-        setMessage(error.message);
+        setFeedback({ type: 'error', text: error.message });
       }
     } finally {
       setIsLoading(false);
@@ -106,13 +126,19 @@ export default function DocumentUpload() {
           {isLoading ? 'Procesando...' : 'Subir y Procesar'}
         </button>
 
-        {message && (
-          <div className={`mt-4 p-3 rounded-md text-center ${
-            message.includes('éxito')
-              ? 'bg-green-100 text-green-800' 
-              : 'bg-red-100 text-red-800'
-          }`}>
-            {message}
+        {feedback.text && (
+          <div
+            className={`mt-4 p-3 rounded-md text-center ${
+              feedback.type === 'success'
+                ? 'bg-green-100 text-green-800'
+                : feedback.type === 'warning'
+                ? 'bg-yellow-100 text-yellow-800'
+                : feedback.type === 'info'
+                ? 'bg-blue-100 text-blue-800'
+                : 'bg-red-100 text-red-800'
+            }`}
+          >
+            {feedback.text}
           </div>
         )}
       </form>
