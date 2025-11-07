@@ -102,6 +102,47 @@ La interfaz queda disponible en:
 - Encuesta de usabilidad (CSUQ) aplicada a prototipo.
 - Chequeo rápido del módulo de chat: `cd backend && npm run test:requests` (no requiere conexión a la base de datos ni credenciales reales de Gemini).
 
+### 📋 Plan de QA de demostración
+
+El siguiente plan permite ejecutar, documentar y presentar una demostración de QA centrada en el flujo de autenticación y la consulta normativa, alineada con buenas prácticas y criterios IEC/ISO 25010.
+
+1. **Objetivo y alcance**
+   - Validar que el prototipo cumple con los atributos de calidad relevantes de IEC/ISO 25010 (funcionalidad, seguridad, usabilidad y fiabilidad) durante el inicio de sesión y la navegación posterior.
+   - Confirmar que solo es posible autenticar usuarios con credenciales registradas en la base de datos y que no existan accesos accidentales mediante entradas maliciosas.
+
+2. **Entorno de prueba**
+   - Backend en Node.js/Express (`backend/server.js`) y frontend en Next.js.
+   - Base de datos PostgreSQL inicializada con `database/init.sql`.
+   - **Opcional Firebase Functions:** despliegue o emulación con `firebase emulators:start --only functions` para exponer la API Express como función `api` (véase carpeta `functions/`). El Firebase Emulator UI (Firebase Studio) permite invocar manualmente la función y observar logs durante la demo.
+
+3. **Procedimiento recomendado**
+   - **Preparación:**
+     1. Ejecutar los pasos de instalación y levantar servicios según se describe en este README.
+     2. (Opcional) Si se usa Firebase, desde la raíz correr `npm install --prefix functions` y luego `firebase emulators:start --only functions`. En Firebase Studio, verificar que el endpoint `api` enruta a las rutas Express habituales.
+   - **Casos de prueba funcionales y de seguridad:**
+     1. Crear o confirmar la existencia del usuario demo `admin@usach.cl` en la base (contraseña inicial `admin`).
+     2. Iniciar sesión desde el frontend y navegar por las funcionalidades habilitadas para su rol.
+     3. Intentar iniciar sesión con credenciales inválidas, cuentas inexistentes y combinaciones alteradas (contraseñas previas, tokens caducados) para comprobar el rechazo.
+     4. Probar el restablecimiento y cambio de contraseña verificando que los tokens de recuperación de una sola vez se invalidan tras su uso.
+     5. Ejecutar intentos con caracteres especiales y patrones de inyección (`' OR '1'='1`, `<script>`, JSON malformado) para confirmar que la capa de validación evita accesos no autorizados.
+   - **Criterios IEC/ISO 25010 aplicados:**
+     - *Funcionalidad:* la autenticación solo permite acceso con credenciales válidas; el chatbot responde consultas normativas registrando logs en `evaluation_logs`.
+     - *Seguridad:* no se permite acceder a datos restringidos sin autenticación; respuestas de error no exponen información sensible; las contraseñas se gestionan con políticas de cambio y recuperación.
+     - *Usabilidad:* mensajes de error claros y formularios accesibles.
+     - *Fiabilidad:* el sistema se mantiene estable ante entradas inválidas repetidas, registrando eventos en logs o consola.
+
+4. **Evidencias sugeridas**
+   - Capturas de pantalla del frontend, respuestas HTTP (códigos 200/401/403), bitácoras del backend y registros en la tabla `evaluation_logs`.
+   - Exportar registros desde Firebase Studio (si se utiliza) para documentar invocaciones a la función `api`.
+
+5. **Registro de responsables**
+   - Documentar en una tabla la fecha, nombre y resultado de cada caso de prueba. Este registro puede mantenerse en el mismo README o en un anexo compartido durante la demostración.
+
+6. **Checklist final**
+   - Confirmar que el usuario demo `admin@usach.cl` permanece restringido a fines de prototipo.
+   - Verificar que no existan credenciales duras en el código y que las variables sensibles se gestionan mediante `.env`.
+   - Revisar que las instrucciones de despliegue y autenticación incluyan advertencias de uso exclusivo para demostraciones.
+
 ## 📂 Estructura del proyecto
 
     chatbot-usach/

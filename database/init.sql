@@ -143,6 +143,27 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE evaluation_logs TO chatbotuser;
 GRANT USAGE, SELECT ON SEQUENCE evaluation_logs_id_seq TO chatbotuser;
 
+-- Columnas requeridas por el backend reciente
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+ALTER TABLE requests
+  ADD COLUMN IF NOT EXISTS context TEXT;
+
+-- Índices recomendados para FTS y trigram
+CREATE INDEX IF NOT EXISTS idx_documents_tsv
+  ON documents
+  USING GIN (to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))));
+
+CREATE INDEX IF NOT EXISTS idx_documents_title_trgm
+  ON documents
+  USING GIN (title gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_documents_content_trgm
+  ON documents
+  USING GIN (content gin_trgm_ops);
+
+
 COMMIT;
 --Verificar permisos (opcional)
 
