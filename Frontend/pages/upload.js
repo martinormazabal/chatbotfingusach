@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import Link from 'next/link';
+import styles from './upload.module.css';
 
 export default function DocumentUpload() {
   const [file, setFile] = useState(null);
@@ -88,60 +90,77 @@ export default function DocumentUpload() {
     }
   };
 
+  const feedbackClass = useMemo(() => {
+    if (!feedback.text) return '';
+    switch (feedback.type) {
+      case 'success':
+        return styles.feedbackSuccess;
+      case 'warning':
+        return styles.feedbackWarning;
+      case 'info':
+        return styles.feedbackInfo;
+      default:
+        return styles.feedbackError;
+    }
+  }, [feedback]);
+
   return (
-    <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h1 className="text-2xl font-bold mb-6">Subir Documento</h1>
-      
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block mb-2 font-medium">Archivo PDF:</label>
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setFile(e.target.files[0])}
-            className="w-full p-2 border rounded file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            required
-          />
-        </div>
+    <div className={styles.page}>
+      <aside className={styles.sidebar}>
+        <Link href="/" legacyBehavior>
+          <a className={styles.backLink}>← Panel principal</a>
+        </Link>
+        <h1>Gestión documental</h1>
+        <p>
+          Sube reglamentos en formato PDF. Recibirás retroalimentación paso a paso sobre el proceso y el estado del OCR.
+        </p>
+        <ul>
+          <li>Formatos aceptados: PDF.</li>
+          <li>Tiempo estimado: hasta 5 minutos por OCR.</li>
+          <li>No cierres la ventana hasta recibir confirmación.</li>
+        </ul>
+      </aside>
 
-        <div>
-          <label className="block mb-2 font-medium">Título (Opcional):</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full p-2 border rounded"
-            placeholder="Si se deja en blanco, se usará el nombre del archivo"
-          />
-        </div>
+      <main className={styles.formArea}>
+        <header className={styles.header}>
+          <h2>Subir documento</h2>
+          <p>Selecciona tu archivo y añade un título de referencia.</p>
+        </header>
 
-        <button 
-          type="submit" 
-          disabled={isLoading}
-          className={`w-full py-2 px-4 rounded text-white font-medium transition-colors 
-            ${isLoading 
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-blue-600 hover:bg-blue-700'}`}
-        >
-          {isLoading ? 'Procesando...' : 'Subir y Procesar'}
-        </button>
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <label className={styles.field}>
+            <span>Archivo PDF *</span>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={(e) => setFile(e.target.files[0])}
+              required
+            />
+          </label>
 
-        {feedback.text && (
-          <div
-            className={`mt-4 p-3 rounded-md text-center ${
-              feedback.type === 'success'
-                ? 'bg-green-100 text-green-800'
-                : feedback.type === 'warning'
-                ? 'bg-yellow-100 text-yellow-800'
-                : feedback.type === 'info'
-                ? 'bg-blue-100 text-blue-800'
-                : 'bg-red-100 text-red-800'
-            }`}
+          <label className={styles.field}>
+            <span>Título (opcional)</span>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Si se deja vacío se usará el nombre del archivo"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className={styles.submitButton}
           >
+            {isLoading ? 'Procesando...' : 'Subir y procesar'}
+          </button>
+
+          <p className={`${styles.feedback} ${feedbackClass}`} role="status" aria-live="polite">
             {feedback.text}
-          </div>
-        )}
-      </form>
+          </p>
+        </form>
+      </main>
     </div>
   );
 }

@@ -2,6 +2,8 @@
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import Link from 'next/link';
+import styles from './detail.module.css';
 
 export default function DocumentDetail() {
   const { query: { id } } = useRouter();
@@ -15,19 +17,49 @@ export default function DocumentDetail() {
       .catch(err => setError(err.response?.data?.error || 'Error al cargar'));
   }, [id]);
 
-  if (error) return <p className="text-red-500">{error}</p>;
+  if (error) {
+    return (
+      <div className={styles.page}>
+        <p className={`${styles.alert} ${styles.alertError}`}>{error}</p>
+        <Link href="/documents" legacyBehavior>
+          <a className={styles.backLink}>← Volver al listado</a>
+        </Link>
+      </div>
+    );
+  }
+
+  const isRichContent = content && typeof content === 'object';
+  const plainText = isRichContent ? content?.text || '' : content;
+  const fileHref = isRichContent && content?.filename ? `/uploads/${content.filename}` : null;
+
   return (
-    <div className="p-4">
-      <h1 className="text-xl mb-4">Detalle del Documento {id}</h1>
-      <pre className="whitespace-pre-wrap">{content}</pre>
-      <a 
-        href={`/uploads/${content.filename}`} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="text-blue-600 hover:underline"
-      >
-        Descargar PDF original
-      </a>
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div>
+          <p className={styles.breadcrumb}>Documentos · Detalle</p>
+          <h1>Documento {id}</h1>
+          <p>Visualiza el contenido extraído por OCR y descarga el archivo original.</p>
+        </div>
+        <Link href="/documents" legacyBehavior>
+          <a className={styles.backLink}>← Volver al listado</a>
+        </Link>
+      </header>
+
+      <section className={styles.contentCard}>
+        <h2>Texto procesado</h2>
+        <pre>{plainText || 'No existe contenido disponible todavía.'}</pre>
+      </section>
+
+      {fileHref && (
+        <a
+          href={fileHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={styles.downloadButton}
+        >
+          Descargar PDF original
+        </a>
+      )}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 import React from 'react';
 import { useState } from "react";
-import { useRouter } from "next/router";
+import Link from "next/link";
+import styles from "./createUser.module.css";
 
 export default function CreateUser() {
-  const router = useRouter();
   const [formData, setFormData] = useState({
     username: "",
     email: "",
@@ -45,50 +45,85 @@ export default function CreateUser() {
   };
 
   return (
-    <div className="max-w-lg mx-auto mt-10 p-6 bg-white shadow-md rounded">
-      <h2 className="text-xl font-bold mb-4">Crear Nuevo Usuario</h2>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          name="username"
-          placeholder="Nombre de usuario"
-          onChange={handleChange}
-          required
-          className="w-full p-2 border mb-2"
-        />
-        <input
-          type="email"
-          name="email"
-          placeholder="Correo electrónico"
-          onChange={handleChange}
-          required
-          className="w-full p-2 border mb-2"
-        />
-        <input
-          type="password"
-          name="password"
-          placeholder="Contraseña"
-          onChange={handleChange}
-          required
-          className="w-full p-2 border mb-2"
-        />
-        <select
-          name="role"
-          onChange={handleChange}
-          defaultValue="estudiante"
-          className="w-full p-2 border mb-2"
-        >
-          <option value="estudiante">Estudiante</option>
-          <option value="funcionario">Funcionario</option>
-          <option value="administrador de documentos">
-            Administrador de documentos
-          </option>
-        </select>
-        <button type="submit" disabled={isLoading} className="bg-blue-500 text-white w-full p-2">
-          {isLoading ? "Creando..." : "Registrar"}
-        </button>
-      </form>
-      {message && <p className="mt-4 text-center">{message}</p>}
+    <div className={styles.page}>
+      <aside className={styles.sidebar}>
+        <Link href="/" legacyBehavior>
+          <a className={styles.backLink}>← Panel principal</a>
+        </Link>
+        <h1>Gestión de Usuarios</h1>
+        <p>
+          Completa los campos para crear una cuenta. Los mensajes de ayuda y errores se muestran de forma clara para una experiencia
+          consistente.
+        </p>
+        <ul className={styles.hints}>
+          <li>Utiliza correos institucionales válidos.</li>
+          <li>Define contraseñas seguras y únicas.</li>
+          <li>Selecciona el rol apropiado antes de guardar.</li>
+        </ul>
+      </aside>
+
+      <main className={styles.formArea}>
+        <header className={styles.formHeader}>
+          <h2>Crear nuevo usuario</h2>
+          <p>Los campos marcados con * son obligatorios.</p>
+        </header>
+
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <label className={styles.field}>
+            <span>Nombre de usuario *</span>
+            <input
+              type="text"
+              name="username"
+              placeholder="Ej: ana.perez"
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <label className={styles.field}>
+            <span>Correo electrónico *</span>
+            <input
+              type="email"
+              name="email"
+              placeholder="usuario@usach.cl"
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <label className={styles.field}>
+            <span>Contraseña temporal *</span>
+            <input
+              type="password"
+              name="password"
+              placeholder="Mínimo 8 caracteres"
+              onChange={handleChange}
+              required
+            />
+          </label>
+
+          <label className={styles.field}>
+            <span>Rol asignado *</span>
+            <select
+              name="role"
+              onChange={handleChange}
+              defaultValue="estudiante"
+            >
+              <option value="estudiante">Estudiante</option>
+              <option value="funcionario">Funcionario</option>
+              <option value="administrador de documentos">Administrador de documentos</option>
+            </select>
+          </label>
+
+          <button type="submit" disabled={isLoading} className={styles.submitButton}>
+            {isLoading ? "Creando..." : "Registrar"}
+          </button>
+
+          <p className={styles.feedback} role="status" aria-live="polite">
+            {message}
+          </p>
+        </form>
+      </main>
     </div>
   );
 }

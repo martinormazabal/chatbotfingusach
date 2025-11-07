@@ -1,0 +1,128 @@
+.page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: clamp(32px, 8vw, 80px);
+    background: linear-gradient(135deg, #e0f2fe 0%, #eef2ff 50%, #f8fafc 100%);
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .brandCircle {
+    position: absolute;
+    top: clamp(20px, 6vw, 60px);
+    right: clamp(20px, 6vw, 60px);
+    width: clamp(80px, 15vw, 140px);
+    height: clamp(80px, 15vw, 140px);
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 60%, #38bdf8 100%);
+    color: #f8fafc;
+    display: grid;
+    place-items: center;
+    font-size: clamp(0.8rem, 2.2vw, 1.4rem);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.35);
+  }
+  
+  .card {
+    width: min(480px, 100%);
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 28px;
+    padding: clamp(32px, 6vw, 48px);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 32px 60px rgba(15, 23, 42, 0.15);
+  }
+  
+  .header h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.2rem);
+    color: #0f172a;
+    font-weight: 700;
+  }
+  
+  .header p {
+    margin: 12px 0 0;
+    color: #475569;
+    line-height: 1.6;
+  }
+  
+  .form {
+    margin-top: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  
+  .inputWrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .inputWrapper span {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1f2937;
+  }
+  
+  .inputWrapper input {
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    padding: 14px 18px;
+    font-size: 1rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    background: #f8fafc;
+    color: #0f172a;
+  }
+  
+  .inputWrapper input:focus-visible {
+    outline: none;
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  }
+  
+  .submitButton {
+    margin-top: 12px;
+    border: none;
+    border-radius: 999px;
+    padding: 14px 22px;
+    font-weight: 600;
+    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    color: #f8fafc;
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  
+  .submitButton:hover,
+  .submitButton:focus-visible {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 32px rgba(14, 165, 233, 0.35);
+    outline: none;
+  }
+  
+  .helperText {
+    margin: 8px 0 0;
+    font-size: 0.85rem;
+    color: #0369a1;
+    text-align: center;
+  }
+  
+  .feedback {
+    min-height: 20px;
+    margin: 4px 0 0;
+    font-size: 0.9rem;
+    color: #b91c1c;
+    text-align: center;
+  }
+  
+  @media (max-width: 640px) {
+    .page {
+      padding: 24px;
+    }
+  
+    .card {
+      padding: 28px;
+    }
+  }

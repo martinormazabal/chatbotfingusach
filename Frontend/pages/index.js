@@ -1,8 +1,9 @@
 // frontend/pages/index.js
 import React from 'react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import styles from './home.module.css';
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -19,34 +20,110 @@ export default function Home() {
     router.push('/');
   };
 
+  const roleLabel = useMemo(() => {
+    if (!user?.role) return '';
+    return user.role.charAt(0).toUpperCase() + user.role.slice(1);
+  }, [user?.role]);
+
   return (
-    <div style={{ textAlign: 'center', padding: '50px' }}>
-      <h1>Panel Principal</h1>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'center' }}>
-        {user?.role === 'funcionario' || user?.role === 'admin' ? (
-          <>
-            <Link href="/admin/create-user"><button>Crear Usuario</button></Link>
-            <Link href="/admin/assign-role"><button>Asignar Perfiles</button></Link>
-          </>
-        ) : null}
-
-        {user?.role === 'administrador de documentos' || user?.role === 'admin' ? (
-          <>
-            <Link href="/upload"><button>Subir Documentos</button></Link>
-            <Link href="/documents"><button>Ver Documentos Subidos</button></Link>
-          </>
-        ) : null}
-
-        {user && (
-          <Link href="/chatbot"><button>Consultar Reglamentos</button></Link>
-        )}
-
-        {!user ? (
-          <Link href="/login"><button>Iniciar Sesión</button></Link>
-        ) : (
-          <button onClick={logout}>Cerrar Sesión</button>
-        )}
+    <div className={styles.page}>
+      <div className={styles.badgeArea}>
+        <div className={styles.badgeCircle} aria-hidden>
+          <span>USACH</span>
+        </div>
       </div>
+      <header className={styles.header}>
+        <div>
+          <p className={styles.breadcrumb}>Inicio</p>
+          <h1 className={styles.title}>Panel Principal</h1>
+          <p className={styles.subtitle}>
+            Accede rápidamente a las acciones principales del sistema. Cada sección mantiene
+            coherencia visual y mensajes claros siguiendo las heurísticas de Nielsen.
+          </p>
+        </div>
+        {user && (
+          <div className={styles.userCard}>
+            <p className={styles.userGreeting}>Hola, {user.username || 'Usuario'}</p>
+            <p className={styles.userRole}>Perfil: {roleLabel}</p>
+            <button type="button" onClick={logout} className={styles.logoutButton}>
+              Cerrar Sesión
+            </button>
+          </div>
+        )}
+      </header>
+
+      <main className={styles.main}>
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}>
+            <h2>Gestión de Usuarios</h2>
+            <p>Administra cuentas y roles de forma segura y consistente.</p>
+          </div>
+          <div className={styles.actionGrid}>
+            <Link href="/admin/create-user" legacyBehavior>
+              <a className={`${styles.actionCard} ${styles.actionPrimary}`}>
+                <h3>Crear Usuario</h3>
+                <p>Registra nuevas personas con perfiles alineados al rol institucional.</p>
+              </a>
+            </Link>
+            <Link href="/admin/assign-role" legacyBehavior>
+              <a className={styles.actionCard}>
+                <h3>Asignar Perfiles</h3>
+                <p>Otorga permisos adecuados respetando la visibilidad del sistema.</p>
+              </a>
+            </Link>
+          </div>
+        </section>
+
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}>
+            <h2>Gestión Documental</h2>
+            <p>Sube, revisa y valida documentos manteniendo un flujo transparente.</p>
+          </div>
+          <div className={styles.actionGrid}>
+            <Link href="/upload" legacyBehavior>
+              <a className={styles.actionCard}>
+                <h3>Subir Documentos</h3>
+                <p>Digitaliza reglamentos y asegura retroalimentación inmediata.</p>
+              </a>
+            </Link>
+            <Link href="/documents" legacyBehavior>
+              <a className={styles.actionCard}>
+                <h3>Ver Documentos Subidos</h3>
+                <p>Monitorea el estado de los archivos y accede al historial OCR.</p>
+              </a>
+            </Link>
+          </div>
+        </section>
+
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}>
+            <h2>Asistente Virtual</h2>
+            <p>Consulta los reglamentos directamente desde el chatbot institucional.</p>
+          </div>
+          <div className={styles.actionGrid}>
+            <Link href="/chatbot" legacyBehavior>
+              <a className={`${styles.actionCard} ${styles.actionAccent}`}>
+                <h3>Consultar Reglamentos</h3>
+                <p>Accede a respuestas rápidas con historial de conversaciones.</p>
+              </a>
+            </Link>
+            {!user && (
+              <Link href="/login" legacyBehavior>
+                <a className={styles.actionCard}>
+                  <h3>Iniciar Sesión</h3>
+                  <p>Ingresa con tus credenciales para habilitar todas las opciones.</p>
+                </a>
+              </Link>
+            )}
+          </div>
+        </section>
+
+        {!user && (
+          <p className={styles.loginReminder}>
+            Para administrar usuarios o documentos necesitas iniciar sesión.
+          </p>
+        )}
+      </main>
     </div>
   );
 }

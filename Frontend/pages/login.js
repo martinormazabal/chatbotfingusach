@@ -3,6 +3,7 @@ import React from 'react';
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import axios from 'axios';
+import styles from './login.module.css';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -22,26 +23,50 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ textAlign: 'center', padding: '50px' }}>
-      <h1>Iniciar Sesión</h1>
-      <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '300px', margin: 'auto' }}>
-        <input
-          type="email"
-          placeholder="Correo"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Contraseña"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <button type="submit">Ingresar</button>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-      </form>
+    <div className={styles.page}>
+      <div className={styles.card}>
+        <header className={styles.header}>
+          <h1>Accede a tu cuenta</h1>
+          <p>Introduce tus credenciales para continuar gestionando el ecosistema documental.</p>
+        </header>
+
+        <form onSubmit={handleLogin} className={styles.form}>
+          <label className={styles.inputWrapper}>
+            <span>Correo institucional</span>
+            <input
+              type="email"
+              placeholder="nombre.apellido@usach.cl"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </label>
+
+          <label className={styles.inputWrapper}>
+            <span>Contraseña</span>
+            <input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </label>
+
+          <button type="submit" className={styles.submitButton}>
+            Ingresar
+          </button>
+
+          <p className={styles.helperText}>¿Olvidaste tu contraseña? Contacta a soporte TI de USACH.</p>
+          <p className={styles.feedback} aria-live="assertive">
+            {error}
+          </p>
+        </form>
+      </div>
+
+      <div className={styles.brandCircle} aria-hidden>
+        <span>USACH</span>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import React from 'react';
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
+import styles from "./documents.module.css";
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([]);
@@ -90,72 +91,99 @@ export default function DocumentsPage() {
     doc.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const statusClass = useMemo(() => {
+    if (error) return styles.alertError;
+    if (successMessage) return styles.alertSuccess;
+    return '';
+  }, [error, successMessage]);
+
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">Documentos Subidos</h1>
-
-      {error && <p className="text-red-500 mb-4">{`Error: ${error}`}</p>}
-      {successMessage && <p className="text-green-500 mb-4">{successMessage}</p>}
-
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Buscar por título..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full p-2 border border-gray-300 rounded"
-        />
-      </div>
-
-      {filteredDocuments.length === 0 && !error ? (
-        <p>No hay documentos subidos aún.</p>
-      ) : (
-        <ul className="space-y-4">
-          {filteredDocuments.map((doc) => (
-            <li key={doc.id} className="bg-white shadow rounded p-4">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold">{doc.title}</h2>
-                <div>
-                  <button
-                    onClick={() => toggleExpand(doc)}
-                    className="bg-blue-500 text-white px-3 py-1 rounded mr-2"
-                  >
-                    {expandedId === doc.id ? "Ver menos" : "Ver más"}
-                  </button>
-                   {/* ADDED: Button to trigger OCR processing */}
-                  <button
-                    onClick={() => handleRunOCR(doc.id)}
-                    className="bg-purple-500 text-white px-3 py-1 rounded mr-2"
-                    disabled={isProcessingOCR === doc.id}
-                  >
-                    {isProcessingOCR === doc.id ? 'Procesando...' : 'Procesar OCR'}
-                  </button>
-                  <Link href={`/documents/${doc.id}`}>
-                     <button className="bg-green-500 text-white px-3 py-1 rounded mr-2">Ver detalles</button>
-                  </Link>
-                  <button
-                    onClick={() => handleDelete(doc.id)}
-                    className="bg-red-500 text-white px-3 py-1 rounded"
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              </div>
-              <p className="text-sm text-gray-500">Subido por: {doc.uploaded_by} el {doc.upload_date}</p>
-              {(!doc.content || !doc.content.trim()) && (
-                <p className="text-sm text-yellow-700 mt-2">
-                  No se ha extraído texto de este documento aún. Usa el botón "Procesar OCR" para intentarlo.
-                </p>
-              )}
-              {expandedId === doc.id && (
-                <div className="mt-2 p-2 bg-gray-100 rounded overflow-auto max-h-60">
-                  {isLoadingContent ? <p>Cargando...</p> : <p className="whitespace-pre-wrap">{currentContent}</p>}
-                </div>
-              )}
-            </li>
-          ))}
+    <div className={styles.page}>
+      <aside className={styles.sidebar}>
+        <Link href="/" legacyBehavior>
+          <a className={styles.backLink}>← Panel principal</a>
+        </Link>
+        <h1>Documentos subidos</h1>
+        <p>Explora el repositorio institucional, procesa OCR bajo demanda y gestiona los archivos existentes.</p>
+        <ul>
+          <li>Utiliza la búsqueda para encontrar documentos rápidamente.</li>
+          <li>Aplica OCR en caso de que el contenido aún no esté disponible.</li>
+          <li>Elimina documentos obsoletos para mantener la base actualizada.</li>
         </ul>
-      )}
+      </aside>
+
+      <main className={styles.main}>
+        <header className={styles.header}>
+          <div>
+            <h2>Repositorio institucional</h2>
+            <p>Resultados filtrados según tu búsqueda.</p>
+          </div>
+          <label className={styles.search}>
+            <span>Buscar por título</span>
+            <input
+              type="text"
+              placeholder="Ej: Reglamento estudiantes"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </label>
+        </header>
+
+        {(error || successMessage) && (
+          <p className={`${styles.alert} ${statusClass}`} role="status" aria-live="assertive">
+            {error ? `Error: ${error}` : successMessage}
+          </p>
+        )}
+
+        {filteredDocuments.length === 0 && !error ? (
+          <div className={styles.emptyState}>
+            <h3>No hay documentos aún</h3>
+            <p>Cuando subas archivos los verás en esta lista con sus detalles y contenido.</p>
+            <Link href="/upload" legacyBehavior>
+              <a>Subir mi primer documento</a>
+            </Link>
+          </div>
+        ) : (
+          <ul className={styles.list}>
+            {filteredDocuments.map((doc) => (
+              <li key={doc.id} className={styles.item}>
+                <div className={styles.itemHeader}>
+                  <div>
+                    <h3>{doc.title}</h3>
+                    <p>Subido por {doc.uploaded_by} el {doc.upload_date}</p>
+                  </div>
+                  <div className={styles.actions}>
+                    <button onClick={() => toggleExpand(doc)} className={styles.secondaryButton}>
+                      {expandedId === doc.id ? "Ver menos" : "Ver más"}
+                    </button>
+                    <button
+                      onClick={() => handleRunOCR(doc.id)}
+                      className={styles.primaryButton}
+                      disabled={isProcessingOCR === doc.id}
+                    >
+                      {isProcessingOCR === doc.id ? 'Procesando...' : 'Procesar OCR'}
+                    </button>
+                    <Link href={`/documents/${doc.id}`} legacyBehavior>
+                      <a className={styles.ghostButton}>Ver detalles</a>
+                    </Link>
+                    <button onClick={() => handleDelete(doc.id)} className={styles.dangerButton}>
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+                {(!doc.content || !doc.content.trim()) && (
+                  <p className={styles.notice}>No se ha extraído texto todavía. Ejecuta el OCR para intentarlo.</p>
+                )}
+                {expandedId === doc.id && (
+                  <div className={styles.contentBox}>
+                    {isLoadingContent ? <p>Cargando...</p> : <p>{currentContent}</p>}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </main>
     </div>
   );
 }

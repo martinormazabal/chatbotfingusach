@@ -1,9 +1,9 @@
 // frontend/pages/admin/assign-role.js
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/router";
+import Link from "next/link";
+import styles from "./assignRole.module.css";
 
 export default function AssignRolePage() {
-  const router = useRouter();
   const [users, setUsers] = useState([]);
   const [formData, setFormData] = useState({
     userId: "",
@@ -93,68 +93,106 @@ export default function AssignRolePage() {
     }
   };
 
-  if (!users) return <p>Cargando...</p>;
+  if (!users) {
+    return <p className={styles.loading}>Cargando…</p>;
+  }
 
   return (
-    <div className="max-w-lg mx-auto mt-10 p-6 bg-white shadow rounded">
-      <h2 className="text-xl font-bold mb-4">Asignar Roles</h2>
-      {message && <p className="mb-4 text-center text-blue-500">{message}</p>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <select
-          name="userId"
-          value={formData.userId}
-          onChange={handleChange}
-          required
-          className="w-full p-2 border"
-        >
-          <option value="">-- Seleccionar usuario --</option>
-          {users.map(u => (
-            <option key={u.id} value={u.id}>
-              {u.username} ({u.role})
-            </option>
-          ))}
-        </select>
-        <select
-          name="role"
-          value={formData.role}
-          onChange={handleChange}
-          required
-          className="w-full p-2 border"
-        >
-          <option value="estudiante">Estudiante</option>
-          <option value="funcionario">Funcionario</option>
-          <option value="administrador de documentos">Administrador de documentos</option>
-        </select>
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="bg-blue-500 text-white w-full p-2 rounded disabled:bg-gray-400"
-        >
-          {isLoading ? "Actualizando..." : "Asignar Rol"}
-        </button>
-      </form>
+    <div className={styles.page}>
+      <aside className={styles.sidebar}>
+        <Link href="/" legacyBehavior>
+          <a className={styles.backLink}>← Panel principal</a>
+        </Link>
+        <h1>Asignación de roles</h1>
+        <p>Revisa la lista de usuarios, actualiza permisos y elimina cuentas cuando sea necesario.</p>
+        <div className={styles.statusCard}>
+          <h2>Guía rápida</h2>
+          <ul>
+            <li>Selecciona un usuario y asigna un rol a la vez.</li>
+            <li>Usa la lista inferior para eliminar múltiples cuentas.</li>
+            <li>Recibirás confirmaciones inmediatas tras cada acción.</li>
+          </ul>
+        </div>
+      </aside>
 
-      <h3 className="text-lg font-semibold mt-8 mb-2">Eliminar Usuarios</h3>
-      <ul className="mb-4">
-        {users.map(u => (
-          <li key={u.id} className="flex items-center">
-            <input
-              type="checkbox"
-              checked={selectedUsers.includes(u.id)}
-              onChange={() => handleUserSelection(u.id)}
-              className="mr-2"
-            />
-            {u.username} ({u.role})
-          </li>
-        ))}
-      </ul>
-      <button
-        onClick={deleteSelectedUsers}
-        disabled={!selectedUsers.length}
-        className="bg-red-500 text-white w-full p-2 rounded disabled:bg-gray-400"
-      >
-        Eliminar Seleccionados
-      </button>
+      <main className={styles.main}>
+        <section className={styles.panel}>
+          <header>
+            <h2>Actualizar rol</h2>
+            <p>Selecciona una cuenta y define el permiso correcto.</p>
+          </header>
+          <form onSubmit={handleSubmit} className={styles.form}>
+            <label className={styles.field}>
+              <span>Usuario *</span>
+              <select
+                name="userId"
+                value={formData.userId}
+                onChange={handleChange}
+                required
+              >
+                <option value="">-- Selecciona un usuario --</option>
+                {users.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.username} ({u.role})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className={styles.field}>
+              <span>Rol *</span>
+              <select
+                name="role"
+                value={formData.role}
+                onChange={handleChange}
+                required
+              >
+                <option value="estudiante">Estudiante</option>
+                <option value="funcionario">Funcionario</option>
+                <option value="administrador de documentos">Administrador de documentos</option>
+              </select>
+            </label>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className={styles.primaryButton}
+            >
+              {isLoading ? "Actualizando..." : "Asignar rol"}
+            </button>
+          </form>
+          <p className={styles.feedback} role="status" aria-live="polite">{message}</p>
+        </section>
+
+        <section className={styles.panel}>
+          <header>
+            <h2>Eliminar usuarios</h2>
+            <p>Selecciona uno o varios usuarios de la lista para eliminarlos definitivamente.</p>
+          </header>
+          <div className={styles.userList}>
+            {users.map(u => (
+              <label key={u.id} className={styles.userRow}>
+                <input
+                  type="checkbox"
+                  checked={selectedUsers.includes(u.id)}
+                  onChange={() => handleUserSelection(u.id)}
+                />
+                <div>
+                  <p>{u.username}</p>
+                  <small>{u.role}</small>
+                </div>
+              </label>
+            ))}
+          </div>
+          <button
+            onClick={deleteSelectedUsers}
+            disabled={!selectedUsers.length}
+            className={styles.dangerButton}
+          >
+            Eliminar seleccionados
+          </button>
+        </section>
+      </main>
     </div>
   );
 }
