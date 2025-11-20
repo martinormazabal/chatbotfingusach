@@ -1,6 +1,7 @@
 // frontend/pages/login.js
 import React from 'react';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import axios from 'axios';
 import styles from './login.module.css';
@@ -24,6 +25,9 @@ export default function LoginPage() {
 
   return (
     <div className={styles.page}>
+      <Link href="/" legacyBehavior>
+        <a className={styles.backLink}>← Panel principal</a>
+      </Link>
       <div className={styles.card}>
         <header className={styles.header}>
           <h1>Accede a tu cuenta</h1>
@@ -58,6 +62,12 @@ export default function LoginPage() {
           </button>
 
           <p className={styles.helperText}>¿Olvidaste tu contraseña? Contacta a soporte TI de USACH.</p>
+          <p className={styles.helperText}>
+            ¿Aún no tienes acceso?{' '}
+            <Link href="/admin/create-user" legacyBehavior>
+              <a className={styles.ctaLink}>Crear cuentas</a>
+            </Link>
+          </p>
           <p className={styles.feedback} aria-live="assertive">
             {error}
           </p>

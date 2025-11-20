@@ -1,0 +1,165 @@
+.page {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: minmax(260px, 320px) 1fr;
+    background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.2), transparent 60%),
+      linear-gradient(180deg, #f8fafc 0%, #e0f2fe 100%);
+    color: #0f172a;
+  }
+
+  .sidebar {
+    padding: clamp(28px, 5vw, 48px);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.8) 100%);
+    color: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .backLink {
+    color: #38bdf8;
+    text-decoration: none;
+    font-weight: 600;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 999px;
+    padding: 8px 14px;
+    width: fit-content;
+  }
+
+  .backLink:hover,
+  .backLink:focus-visible {
+    outline: none;
+    box-shadow: 0 12px 28px rgba(56, 189, 248, 0.35);
+  }
+
+  .breadcrumb {
+    margin: 0;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgba(248, 250, 252, 0.7);
+  }
+
+  .sidebar h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.4rem);
+  }
+
+  .sidebar p {
+    margin: 0;
+    line-height: 1.6;
+    color: rgba(248, 250, 252, 0.8);
+  }
+
+  .heuristics {
+    margin-top: auto;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 20px;
+    padding: 20px;
+  }
+
+  .heuristics h2 {
+    margin: 0 0 10px;
+    font-size: 1.1rem;
+  }
+
+  .heuristics ul {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: rgba(248, 250, 252, 0.9);
+  }
+
+  .main {
+    padding: clamp(32px, 6vw, 72px);
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+
+  .cardGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
+  }
+
+  .card {
+    border-radius: 24px;
+    padding: 24px;
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    box-shadow: 0 24px 32px rgba(15, 23, 42, 0.08);
+  }
+
+  .card h3 {
+    margin: 0 0 10px;
+    font-size: 1.2rem;
+  }
+
+  .card p {
+    margin: 0;
+    color: #475569;
+    line-height: 1.5;
+  }
+
+  .warning {
+    border-radius: 26px;
+    padding: 28px;
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(248, 113, 113, 0.35));
+    border: 1px solid rgba(248, 113, 113, 0.3);
+  }
+
+  .warning h2 {
+    margin: 0 0 12px;
+  }
+
+  .warning ul {
+    margin: 0 0 12px;
+    padding-left: 20px;
+    color: #7c2d12;
+  }
+
+  .warning p {
+    margin: 0;
+    color: #7c2d12;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .primaryButton,
+  .secondaryButton {
+    border-radius: 999px;
+    padding: 12px 24px;
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+  }
+
+  .primaryButton {
+    background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+    color: #fff;
+  }
+
+  .secondaryButton {
+    border: 1px solid rgba(15, 23, 42, 0.2);
+    color: #0f172a;
+    background: #fff;
+  }
+
+  @media (max-width: 960px) {
+    .page {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      border-bottom-left-radius: 32px;
+      border-bottom-right-radius: 32px;
+    }
+  }

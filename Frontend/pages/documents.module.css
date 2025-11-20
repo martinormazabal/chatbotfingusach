@@ -1,0 +1,226 @@
+.page {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: minmax(260px, 320px) 1fr;
+    background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 55%),
+      linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+    color: #0f172a;
+  }
+
+  .sidebar {
+    padding: clamp(32px, 5vw, 56px);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.8) 100%);
+    color: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .backLink {
+    color: #38bdf8;
+    text-decoration: none;
+    font-weight: 600;
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    border-radius: 999px;
+    padding: 8px 14px;
+    width: fit-content;
+  }
+
+  .sidebar h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.4rem);
+  }
+
+  .sidebar p {
+    margin: 0;
+    line-height: 1.6;
+    color: rgba(248, 250, 252, 0.8);
+  }
+
+  .sidebar ul {
+    margin: 0;
+    padding-left: 18px;
+    color: rgba(248, 250, 252, 0.85);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .main {
+    padding: clamp(32px, 6vw, 72px);
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .header h2 {
+    margin: 0;
+    font-size: clamp(1.6rem, 2.6vw, 2rem);
+  }
+
+  .header p {
+    margin: 6px 0 0;
+    color: #475569;
+  }
+
+  .search {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 240px;
+  }
+
+  .search span {
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  .search input {
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    padding: 12px 16px;
+    background: #fff;
+  }
+
+  .alert {
+    margin: 0;
+    padding: 12px 16px;
+    border-radius: 16px;
+    border: 1px solid transparent;
+    font-weight: 500;
+  }
+
+  .alertError {
+    background: rgba(248, 113, 113, 0.15);
+    border-color: rgba(248, 113, 113, 0.4);
+    color: #b91c1c;
+  }
+
+  .alertSuccess {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.4);
+    color: #15803d;
+  }
+
+  .list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .item {
+    border-radius: 24px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 20px 30px rgba(15, 23, 42, 0.08);
+  }
+
+  .itemHeader {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .itemHeader h3 {
+    margin: 0;
+  }
+
+  .itemHeader p {
+    margin: 4px 0 0;
+    color: #475569;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .secondaryButton,
+  .primaryButton,
+  .ghostButton,
+  .dangerButton {
+    border-radius: 999px;
+    padding: 10px 18px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+  }
+
+  .secondaryButton {
+    background: rgba(148, 163, 184, 0.15);
+    color: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+  }
+
+  .primaryButton {
+    background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+    color: #fff;
+  }
+
+  .ghostButton {
+    background: transparent;
+    border: 1px dashed rgba(79, 70, 229, 0.5);
+    color: #4f46e5;
+  }
+
+  .dangerButton {
+    background: linear-gradient(135deg, #fb7185 0%, #f43f5e 100%);
+    color: #fff;
+  }
+
+  .notice {
+    margin: 12px 0 0;
+    color: #be123c;
+    font-weight: 500;
+  }
+
+  .contentBox {
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 18px;
+    background: #f8fafc;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .emptyState {
+    text-align: center;
+    border-radius: 24px;
+    border: 1px dashed rgba(148, 163, 184, 0.5);
+    padding: 32px;
+    color: #475569;
+    background: rgba(248, 250, 252, 0.9);
+  }
+
+  .emptyState a {
+    color: #0ea5e9;
+    font-weight: 600;
+  }
+
+  @media (max-width: 960px) {
+    .page {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      border-bottom-left-radius: 32px;
+      border-bottom-right-radius: 32px;
+    }
+  }

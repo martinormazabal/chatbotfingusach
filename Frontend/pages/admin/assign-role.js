@@ -3,6 +3,8 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import styles from "./assignRole.module.css";
 
+const PROTECTED_EMAIL = 'admin@usach.cl';
+
 export default function AssignRolePage() {
   const [users, setUsers] = useState([]);
   const [formData, setFormData] = useState({
@@ -19,7 +21,8 @@ export default function AssignRolePage() {
         const res = await fetch("/api/users");
         if (!res.ok) throw new Error(`Error ${res.status}`);
         const data = await res.json();
-        setUsers(Array.isArray(data) ? data : []);
+        const sanitized = Array.isArray(data) ? data.filter(user => user.email !== PROTECTED_EMAIL) : [];
+        setUsers(sanitized);
       } catch (err) {
         console.error("Error fetching users:", err);
         setUsers([]);
@@ -105,6 +108,9 @@ export default function AssignRolePage() {
         </Link>
         <h1>Asignación de roles</h1>
         <p>Revisa la lista de usuarios, actualiza permisos y elimina cuentas cuando sea necesario.</p>
+        <Link href="/admin/create-user" legacyBehavior>
+          <a className={styles.ctaButton}>Crear cuentas</a>
+        </Link>
         <div className={styles.statusCard}>
           <h2>Guía rápida</h2>
           <ul>

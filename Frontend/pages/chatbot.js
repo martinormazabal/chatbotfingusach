@@ -142,6 +142,9 @@ export default function Chat() {
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
+        <Link href="/" legacyBehavior>
+          <a className={styles.backLink}>← Panel principal</a>
+        </Link>
         <div className={styles.sidebarHeader}>
           <h1>Asistente normativo</h1>
           <p>
