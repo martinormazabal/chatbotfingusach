@@ -13,6 +13,8 @@ export default function DocumentsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [userRole, setUserRole] = useState('');
+  const [userEmail, setUserEmail] = useState('');
   const EMPTY_CONTENT_MESSAGE = 'No hay contenido disponible todavía. Utiliza "Procesar OCR" para intentar extraerlo.';
 
   async function fetchDocuments() {
@@ -31,8 +33,36 @@ export default function DocumentsPage() {
   }
 
   useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        setUserRole(parsedUser.role || '');
+        setUserEmail(parsedUser.email || '');
+      } catch (storageError) {
+        console.warn('No se pudo leer el usuario almacenado:', storageError);
+        setUserRole('');
+        setUserEmail('');
+      }
+    }
     fetchDocuments();
   }, []);
+
+  const isAdminRole = useMemo(() => userRole?.toLowerCase() === 'admin', [userRole]);
+  const isDocumentAdmin = useMemo(
+    () => userRole?.toLowerCase() === 'administrador de documentos',
+    [userRole]
+  );
+  const isPrototypeAdmin = useMemo(
+    () => userEmail?.toLowerCase() === 'admin@usach.cl',
+    [userEmail]
+  );
+
+  const canDeleteDocuments = useMemo(
+    () => isPrototypeAdmin || isAdminRole || isDocumentAdmin,
+    [isPrototypeAdmin, isAdminRole, isDocumentAdmin]
+  );
+
 
   const toggleExpand = (doc) => {
     if (expandedId === doc.id) {
@@ -69,6 +99,11 @@ export default function DocumentsPage() {
   };
 
   const handleDelete = async (id) => {
+    if (!canDeleteDocuments) {
+      setError('No tienes permisos para eliminar documentos.');
+      setSuccessMessage('');
+      return;
+    }
     if (window.confirm("¿Estás seguro de que quieres eliminar este documento?")) {
       try {
         await axios.delete(`/api/documents/${id}`);
@@ -166,9 +201,11 @@ export default function DocumentsPage() {
                     <Link href={`/documents/${doc.id}`} legacyBehavior>
                       <a className={styles.ghostButton}>Ver detalles</a>
                     </Link>
-                    <button onClick={() => handleDelete(doc.id)} className={styles.dangerButton}>
-                      Eliminar
-                    </button>
+                    {canDeleteDocuments && (
+                      <button onClick={() => handleDelete(doc.id)} className={styles.dangerButton}>
+                        Eliminar
+                      </button>
+                    )}
                   </div>
                 </div>
                 {(!doc.content || !doc.content.trim()) && (
