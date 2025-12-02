@@ -74,7 +74,7 @@ export default function CreateUser() {
             <input
               type="text"
               name="username"
-              placeholder="Ej: ana.perez"
+              placeholder="Ej: Ana Perez"
               onChange={handleChange}
               required
             />
@@ -85,7 +85,7 @@ export default function CreateUser() {
             <input
               type="email"
               name="email"
-              placeholder="usuario@usach.cl"
+              placeholder="usuario@usach.cl; Ej:ana.perez@usach.cl"
               onChange={handleChange}
               required
             />
@@ -96,7 +96,7 @@ export default function CreateUser() {
             <input
               type="password"
               name="password"
-              placeholder="Mínimo 8 caracteres"
+              placeholder="Mínimo 6 caracteres"
               onChange={handleChange}
               required
             />

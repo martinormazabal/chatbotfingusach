@@ -36,19 +36,61 @@ const VALID_ROLES = [
 ];
 
 const PASSWORD_POLICY = {
-  minLength: 10,
+  minLength: 6,
   minLowercase: 1,
   minUppercase: 1,
   minDigits: 1,
-  minSymbols: 1,
+  minSymbols: 0,
 };
 
-const passwordRegex = new RegExp(
-  `^(?=(?:.*[a-z]){${PASSWORD_POLICY.minLowercase},})(?=(?:.*[A-Z]){${PASSWORD_POLICY.minUppercase},})(?=(?:.*\\d){${PASSWORD_POLICY.minDigits},})(?=(?:.*[^A-Za-z\\d]){${PASSWORD_POLICY.minSymbols},}).{${PASSWORD_POLICY.minLength},}$`
-);
+function describePasswordPolicy(policy = PASSWORD_POLICY) {
+  const segments = [
+    `mínimo ${policy.minLength} caracteres`,
+    `${policy.minUppercase} mayúscula${policy.minUppercase > 1 ? "s" : ""}`,
+    `${policy.minLowercase} minúscula${policy.minLowercase > 1 ? "s" : ""}`,
+    `${policy.minDigits} número${policy.minDigits > 1 ? "s" : ""}`,
+    `${policy.minSymbols} símbolo${policy.minSymbols > 1 ? "s" : ""}`,
+  ];
+  return `La contraseña no cumple con la política de seguridad (${segments.join(", ")}).`;
+}
 
 function validatePasswordStrength(password) {
-  return passwordRegex.test(password || "");
+  const stats = {
+    length: 0,
+    lowercase: 0,
+    uppercase: 0,
+    digits: 0,
+    symbols: 0,
+  };
+
+  if (!password) {
+    return { isValid: false, stats };
+  }
+
+  for (const char of password) {
+    stats.length += 1;
+
+    if (/\p{Ll}/u.test(char)) {
+      stats.lowercase += 1;
+    } else if (/\p{Lu}/u.test(char)) {
+      stats.uppercase += 1;
+    } else if (/\p{N}/u.test(char)) {
+      stats.digits += 1;
+    } else {
+      // Todo carácter que no sea letra o número cuenta como símbolo, incluyendo
+      // puntuación, emojis, espacios u otros signos Unicode.
+      stats.symbols += 1;
+    }
+  }
+
+  const isValid =
+    stats.length >= PASSWORD_POLICY.minLength &&
+    stats.lowercase >= PASSWORD_POLICY.minLowercase &&
+    stats.uppercase >= PASSWORD_POLICY.minUppercase &&
+    stats.digits >= PASSWORD_POLICY.minDigits &&
+    stats.symbols >= PASSWORD_POLICY.minSymbols;
+
+  return { isValid, stats };
 }
 
 async function upsertPasswordResetToken(userId, tokenHash, client) {
@@ -168,10 +210,10 @@ router.post("/register", async (req, res) => {
     }
 
     const finalPassword = password || generateTemporaryPassword();
-    if (!validatePasswordStrength(finalPassword)) {
+    const { isValid } = validatePasswordStrength(finalPassword);
+    if (!isValid) {
       return res.status(400).json({
-        message:
-          "La contraseña no cumple con la política de seguridad (mínimo 10 caracteres, mayúsculas, minúsculas, números y símbolos).",
+        message: describePasswordPolicy(),
       });
     }
 
@@ -306,10 +348,10 @@ router.post("/:id(\d+)/change-password", async (req, res) => {
     });
   }
 
-  if (!validatePasswordStrength(newPassword)) {
+  const { isValid } = validatePasswordStrength(newPassword);
+  if (!isValid) {
     return res.status(400).json({
-      message:
-        "La nueva contraseña no cumple con la política de seguridad (mínimo 10 caracteres, mayúsculas, minúsculas, números y símbolos).",
+      message: describePasswordPolicy(),
     });
   }
 
@@ -418,10 +460,10 @@ router.post("/password-reset/confirm", async (req, res) => {
     });
   }
 
-  if (!validatePasswordStrength(newPassword)) {
+  const { isValid } = validatePasswordStrength(newPassword);
+  if (!isValid) {
     return res.status(400).json({
-      message:
-        "La nueva contraseña no cumple con la política de seguridad (mínimo 10 caracteres, mayúsculas, minúsculas, números y símbolos).",
+      message: describePasswordPolicy(),
     });
   }
 

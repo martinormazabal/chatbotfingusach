@@ -28,6 +28,12 @@ export default function Home() {
   const isAdminPrototype = user?.email === 'admin@usach.cl';
   const role = user?.role;
 
+  const displayName = useMemo(() => {
+    if (!user?.username) return 'Usuario';
+    const parts = user.username.trim().split(/\s+/);
+    return parts[0] || 'Usuario';
+  }, [user?.username]);
+
   const visibility = useMemo(() => {
     if (isAdminPrototype) {
       return {
@@ -89,7 +95,7 @@ export default function Home() {
         </div>
         {user && (
           <div className={styles.userCard}>
-            <p className={styles.userGreeting}>Hola, {user.username || 'Usuario'}</p>
+            <p className={styles.userGreeting}>Hola, {displayName}</p>
             <p className={styles.userRole}>Perfil: {roleLabel}</p>
             <button type="button" onClick={logout} className={styles.logoutButton}>
               Cerrar Sesión
