@@ -196,7 +196,7 @@ export default function Chat() {
           </ul>
         </div>
 
-        <Link className={styles.policyLink} href="/politicas-ia" target="_blank">
+        <Link className={styles.policyLink} href="/politicas-ia">
           Políticas de uso de IA
         </Link>
       </aside>

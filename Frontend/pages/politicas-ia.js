@@ -79,7 +79,7 @@ export default function PoliticasIA() {
 
         <section className={styles.actions}>
           <Link href="/chatbot" legacyBehavior>
-            <a className={styles.primaryButton}>Ir al asistente</a>
+          <a className={styles.primaryButton}>Volver al asistente virtual</a>
           </Link>
           <Link href="/" legacyBehavior>
             <a className={styles.secondaryButton}>Volver al panel</a>
