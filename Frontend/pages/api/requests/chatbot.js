@@ -1,4 +1,4 @@
-import { resolveBackendBaseUrl } from "../../../lib/backend-url";
+import { buildBackendApiUrl, resolveBackendBaseUrl } from "@/lib/backend-url";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -9,11 +9,14 @@ export default async function handler(req, res) {
   const backendBaseUrl = resolveBackendBaseUrl(req);
 
   try {
-    const response = await fetch(`${backendBaseUrl}/api/requests/chatbot`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body || {}),
-    });
+    const response = await fetch(
+      buildBackendApiUrl(backendBaseUrl, "/api/requests/chatbot"),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body || {}),
+      }
+    );
 
     const data = await response.json();
     return res.status(response.status).json(data);

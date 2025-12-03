@@ -50,3 +50,14 @@ export function resolveBackendBaseUrl(req) {
 
   return `${defaultProto}://127.0.0.1:${defaultPort}`;
 }
+
+export function buildBackendApiUrl(baseUrl, apiPath = "") {
+  const sanitizedBase = sanitizeBaseUrl(baseUrl);
+  const normalizedPath = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+
+  if (sanitizedBase.toLowerCase().endsWith("/api") && normalizedPath.startsWith("/api/")) {
+    return `${sanitizedBase}${normalizedPath.slice(4)}`;
+  }
+
+  return `${sanitizedBase}${normalizedPath}`;
+}

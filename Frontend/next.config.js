@@ -26,6 +26,13 @@ module.exports = {
     return process.env.NODE_ENV === "development"
       ? [
           {
+            // Permite que las rutas Next.js bajo /api/users se resuelvan
+            // internamente (evita que el proxy las desvíe al backend
+            // directamente, lo que generaba respuestas HTML 404).
+            source: "/api/users/:path*",
+            destination: "/api/users/:path*",
+          },
+          {
             source: "/api/:path*",
             destination: `${backendOrigin}/api/:path*`,
           },

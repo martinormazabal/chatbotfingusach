@@ -35,6 +35,8 @@ const VALID_ROLES = [
   "admin",
 ];
 
+const ALLOWED_ROLE_METHODS = ["PUT", "POST"];
+
 const PASSWORD_POLICY = {
   minLength: 6,
   minLowercase: 1,
@@ -278,7 +280,7 @@ router.get("/", async (req, res) => {
 });
 
 // Ruta para actualizar el perfil de un usuario
-router.put("/:id(\d+)/role", async (req, res) => {
+async function updateUserRole(req, res) {
   try {
     const { id } = req.params;
     if (!req.body.role) {
@@ -330,11 +332,24 @@ Administración.`,
       query: error.query,
       parameters: error.parameters
     });
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Error en el servidor",
-      details: error.message 
+      details: error.message
     });
   }
+}
+
+// Ruta para actualizar el perfil de un usuario (PUT o POST)
+router.put("/:id(\d+)/role", updateUserRole);
+router.post("/:id(\d+)/role", updateUserRole);
+
+// Acepta IDs no numéricos (por ejemplo, strings de consulta que lleguen con
+// caracteres) y devuelve mensajes JSON coherentes en lugar de HTML 404.
+router.all("/:id/role", (req, res) => {
+  if (!ALLOWED_ROLE_METHODS.includes(req.method)) {
+    return res.status(405).json({ message: "Método no permitido" });
+  }
+  return updateUserRole(req, res);
 });
 
 // Ruta para cambiar la contraseña de un usuario

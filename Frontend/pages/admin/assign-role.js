@@ -5,6 +5,21 @@ import styles from "./assignRole.module.css";
 
 const PROTECTED_EMAIL = 'admin@usach.cl';
 
+async function parseJsonSafe(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+  const text = await response.text();
+  if (text?.trim().startsWith("<")) {
+    return {
+      message:
+        "No se pudo contactar con el servicio de roles. Intenta nuevamente o verifica el backend.",
+    };
+  }
+  return { message: text || "Respuesta no válida del servidor" };
+}
+
 export default function AssignRolePage() {
   const [users, setUsers] = useState([]);
   const [formData, setFormData] = useState({
@@ -20,7 +35,7 @@ export default function AssignRolePage() {
       try {
         const res = await fetch("/api/users");
         if (!res.ok) throw new Error(`Error ${res.status}`);
-        const data = await res.json();
+        const data = await parseJsonSafe(res);
         const sanitized = Array.isArray(data) ? data.filter(user => user.email !== PROTECTED_EMAIL) : [];
         setUsers(sanitized);
       } catch (err) {
@@ -48,7 +63,7 @@ export default function AssignRolePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: formData.role }),
       });
-      const data = await res.json();
+      const data = await parseJsonSafe(res);
       if (res.ok) {
         setMessage("Rol actualizado exitosamente.");
         setUsers(prev =>
@@ -82,7 +97,7 @@ export default function AssignRolePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: selectedUsers }),
       });
-      const data = await res.json();
+      const data = await parseJsonSafe(res);
       if (res.ok) {
         setMessage(data.message);
         setUsers(prev => prev.filter(u => !selectedUsers.includes(u.id)));
