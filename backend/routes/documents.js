@@ -23,6 +23,18 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
+function improveTextLegibility(text = "") {
+  if (!text) return "";
+
+  return text
+    .replace(/\r/g, "")
+    .replace(/-\s*\n\s*/g, "") // elimina guiones de cortes de línea
+    .replace(/\s*\n\s*/g, " ")
+    .replace(/([a-záéíóúñ0-9])(?=[A-ZÁÉÍÓÚÑ])/g, "$1. ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 async function enhancedOCRProcessing(filePath, originalFilename) {
   let worker;
   const { fromPath } = require("pdf2pic");
@@ -118,6 +130,8 @@ router.post('/upload', upload.single('document'), async (req, res) => {
       }
     }
 
+    const cleanedText = improveTextLegibility(extractedText);
+
     let result;
     try {
       result = await pool.query(
@@ -126,7 +140,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
         RETURNING id, title, upload_date, filename, source_url`,
         [
           req.body.title || req.file.originalname,
-          extractedText,
+          cleanedText,
           req.body.uploaded_by || 'Anónimo',
           req.file.filename,
           req.body.source_url || null
@@ -177,10 +191,11 @@ router.post('/:id/run-ocr', async (req, res) => {
     const filePath = path.join(uploadDir, filename);
 
     const extractedText = await enhancedOCRProcessing(filePath, filename);
+    const cleanedText = improveTextLegibility(extractedText);
 
     const updatedDoc = await pool.query(
       'UPDATE documents SET content = $1 WHERE id = $2 RETURNING id, content',
-      [extractedText.trim(), id]
+      [cleanedText.trim(), id]
     );
 
     res.status(200).json({ 

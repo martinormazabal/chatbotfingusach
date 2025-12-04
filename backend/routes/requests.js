@@ -24,6 +24,23 @@ function sanitizeText(text = "") {
   return removeMd(text.replace(CITATION_REGEX, "")).trim();
 }
 
+function detectReferences(text = "") {
+  const refPatterns = [
+    /art[íi]culo\s+\d+[\w-]*/gi,
+    /art\.\s*\d+/gi,
+    /cap[íi]tulo\s+[\w-]+/gi,
+    /secci[óo]n\s+[\w-]+/gi,
+  ];
+
+  const refs = new Set();
+  for (const pattern of refPatterns) {
+    const matches = text.match(pattern) || [];
+    matches.forEach((m) => refs.add(m.trim()));
+  }
+
+  return Array.from(refs);
+}
+
 function formatExcerpt(raw = "") {
   const clean = sanitizeText(raw).replace(/\s+/g, " ").trim();
   if (!clean) return "";
@@ -105,6 +122,17 @@ function buildExcerptFromContent(content = "", queryTokens = []) {
   return normalized.slice(start, end);
 }
 
+function formatContextForPrompt(blocks = []) {
+  if (!Array.isArray(blocks) || !blocks.length) return "No hay documentos relevantes.";
+
+  return blocks
+    .map((b, i) => {
+      const refs = b.references?.length ? `\nReferencias: ${b.references.join(", ")}` : "";
+      return `[#${i + 1}] ${b.title}\n${b.excerpt || ""}${refs}`;
+    })
+    .join("\n\n");
+}
+
 async function retrieveFromCache(query = "") {
   const docs = await loadDocumentsFromCache();
   if (!docs.length) return [];
@@ -157,12 +185,19 @@ if (GEMINI_API_KEY) {
 }
 
 // 3.2) Lista de modelos viables (sólo los que sabes que tu cuenta soporta)
-const MODEL_FALLBACKS = [
+// 3.2) Lista de modelos viables (configurable por env GEMINI_MODELS="modelo1,modelo2")
+const DEFAULT_MODELS = [
   "gemini-2.5-flash",
   "gemini-2.5-pro",
   "gemini-2.0-flash",
   "gemini-2.0-pro-exp",
-].filter(Boolean);
+];
+const MODEL_FALLBACKS = (process.env.GEMINI_MODELS || "")
+  .split(/[,\s]+/)
+  .filter(Boolean)
+  .concat(DEFAULT_MODELS)
+  .filter(Boolean)
+  .filter((m, idx, arr) => arr.indexOf(m) === idx);
 
 const generationConfig = {
   temperature: 0.2,
@@ -199,20 +234,25 @@ async function tryChatWithModel(modelName, { query, contextBlocks, history }) {
       parts: [{ text: h.text }]
     }));
 
-    const contextText = contextBlocks?.length
-      ? contextBlocks.map((b, i) => `[#${i+1}] ${b.title}\n${b.excerpt || ""}`).join("\n\n")
-      : "No hay documentos relevantes.";
+    const contextText = formatContextForPrompt(contextBlocks);
 
     const guidance = contextBlocks?.length
       ? "Responde SOLO con lo sustentado en el contexto. Si falta un detalle, indícalo y orienta con la fuente."
       : "El contexto es débil. Da una definición breve, sin inventar normativa, y orienta a fuentes oficiales.";
 
+      const responseFormat = `Formato de respuesta:
+      - Resumen: limita a 2-3 frases.
+      - Fundamento normativo: cita artículo/sección y documento fuente (ej: Artículo 5, Reglamento de Convivencia USACH).
+      - Pasos sugeridos: 2-4 pasos accionables para el estudiante.`;
+    
     const systemPreamble = `
 Eres un asistente de normativa de la Universidad de Santiago de Chile (USACH).
 Usa únicamente el CONTEXTO para afirmaciones normativas.
 ${guidance}
 Si no hay evidencia textual, dilo y ofrece ruta de verificación.
-Responde en español, claro y breve. Incluye “Pasos sugeridos” cuando aplique.
+Responde en español, claro y breve.
+
+${responseFormat}
 `.trim();
 
     const chat = model.startChat({
@@ -226,6 +266,7 @@ Responde en español, claro y breve. Incluye “Pasos sugeridos” cuando apliqu
     });
 
     // Nota: El SDK de Node no soporta `signal` en `sendMessage`. Se maneja con el timeout.
+    const prompt = `Pregunta del estudiante: ${query}\n\nContexto relevante:\n${contextText}\n\nRecuerda mantener el formato indicado.`;
     const result = await chat.sendMessage(query);
     const text = typeof result?.response?.text === "function" ? result.response.text() : "";
     return { text: text?.trim() || "No se obtuvo texto del modelo.", modelName };
@@ -297,7 +338,14 @@ router.post("/chatbot", async (req, res) => {
         excerpt: formatExcerpt(d.excerpt),
     }));
 
-    const contextBlocks = docs.map(d => ({ title: d.title || "Documento", excerpt: formatExcerpt(d.excerpt) || "" }));
+    const contextBlocks = docs.map(d => {
+      const excerpt = formatExcerpt(d.excerpt) || "";
+      return {
+        title: d.title || "Documento",
+        excerpt,
+        references: detectReferences(excerpt || ""),
+      };
+    });
 
     const { text: aiResponse, modelName: resolvedModel } = await runChat({ query, contextBlocks, history });
 
@@ -324,16 +372,18 @@ router.post("/log", async (req, res) => {
 });
 
 async function retrieveContext(query) {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+
   try {
     await refreshDocumentCacheFromDb();
-    const ft = await pool.query(`SELECT id, title, filename, NULL::text AS source_url, ts_rank(to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))), websearch_to_tsquery('spanish', unaccent($1))) AS score, substring(content for 1500) AS excerpt FROM documents WHERE to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))) @@ websearch_to_tsquery('spanish', unaccent($1)) ORDER BY score DESC LIMIT 3`, [query]);
-    if (ft.rows.length > 0) return { docs: ft.rows, mode: "fulltext" };
+    const ft = await pool.query(`SELECT id, title, filename, COALESCE(source_url, NULL)::text AS source_url, ts_rank(to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))), websearch_to_tsquery('spanish', unaccent($1))) AS score, content FROM documents WHERE to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))) @@ websearch_to_tsquery('spanish', unaccent($1)) ORDER BY score DESC LIMIT 3`, [query]);
+    if (ft.rows.length > 0) return { docs: ft.rows.map((row) => ({ ...row, excerpt: buildExcerptFromContent(row.content || "", tokens) })), mode: "fulltext" };
 
-    const tg = await pool.query(`SELECT id, title, filename, COALESCE(source_url, NULL)::text AS source_url, greatest(similarity(title, $1), similarity(content, $1)) AS score, substring(content for 1500) AS excerpt FROM documents ORDER BY score DESC LIMIT 3;`, [query]);
-    if (tg.rows.length > 0 && (tg.rows[0].score ?? 0) > 0.1) return { docs: tg.rows, mode: "trigram" };
+    const tg = await pool.query(`SELECT id, title, filename, COALESCE(source_url, NULL)::text AS source_url, greatest(similarity(title, $1), similarity(content, $1)) AS score, content FROM documents ORDER BY score DESC LIMIT 3;`, [query]);
+    if (tg.rows.length > 0 && (tg.rows[0].score ?? 0) > 0.1) return { docs: tg.rows.map((row) => ({ ...row, excerpt: buildExcerptFromContent(row.content || "", tokens) })), mode: "trigram" };
 
-    const recent = await pool.query(`SELECT id, title, filename, COALESCE(source_url, NULL)::text AS source_url, 0 AS score, substring(content for 1500) AS excerpt FROM documents ORDER BY upload_date DESC LIMIT 3;`);
-    if (recent.rows.length > 0) return { docs: recent.rows, mode: "recent" };
+    const recent = await pool.query(`SELECT id, title, filename, COALESCE(source_url, NULL)::text AS source_url, 0 AS score, content FROM documents ORDER BY upload_date DESC LIMIT 3;`);
+    if (recent.rows.length > 0) return { docs: recent.rows.map((row) => ({ ...row, excerpt: buildExcerptFromContent(row.content || "", tokens) })), mode: "recent" };
 
   } catch (dbErr) {
     console.warn("⚠️  Búsqueda en BD falló, se usará el almacenamiento local:", dbErr.message);
