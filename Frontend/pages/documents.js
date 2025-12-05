@@ -17,6 +17,17 @@ export default function DocumentsPage() {
   const [userEmail, setUserEmail] = useState('');
   const EMPTY_CONTENT_MESSAGE = 'No hay contenido disponible todavía. Utiliza "Procesar OCR" para intentar extraerlo.';
 
+  const statusMap = useMemo(
+    () => ({
+      'embedded-text': { label: 'Texto embebido detectado', tone: 'success' },
+      'ocr-success': { label: 'Texto extraído mediante OCR', tone: 'success' },
+      'ocr-empty': { label: 'OCR sin texto legible', tone: 'warning' },
+      'ocr-failed': { label: 'OCR fallido o pendiente', tone: 'danger' },
+      pending: { label: 'Pendiente de procesamiento', tone: 'info' },
+    }),
+    []
+  );
+
   async function fetchDocuments() {
     try {
       const { data } = await axios.get("/api/documents");
@@ -70,29 +81,61 @@ export default function DocumentsPage() {
       setCurrentContent('');
     } else {
       // The content is now loaded initially with the document list.
-      setCurrentContent(doc.content?.trim() ? doc.content : EMPTY_CONTENT_MESSAGE);
+      setCurrentContent(doc.content?.trim() ? doc.content : (doc.ocr_message || EMPTY_CONTENT_MESSAGE));
       setExpandedId(doc.id);
     }
   };
 
+  const renderStatusBadges = (doc) => {
+    const badges = [];
+    const statusConfig = statusMap[doc.ocr_status] || statusMap.pending;
+    badges.push(statusConfig);
+    badges.push(doc.has_text ? { label: 'Texto almacenado', tone: 'success' } : { label: 'Sin texto disponible', tone: 'danger' });
+    if (doc.ocr_used) {
+      badges.push({ label: 'OCR utilizado', tone: 'info' });
+    }
+
+    return badges.map((badge, index) => (
+      <span
+        key={`${doc.id}-${badge.label}-${index}`}
+        className={`${styles.statusBadge} ${styles[`status${badge.tone.charAt(0).toUpperCase()}${badge.tone.slice(1)}`]}`}
+      >
+        {badge.label}
+      </span>
+    ));
+  };
+
+  const canRequestOCR = (doc) => !doc.has_text || ['ocr-empty', 'ocr-failed', 'pending'].includes(doc.ocr_status);
+
   // ADDED: Function to handle on-demand OCR processing.
-  const handleRunOCR = async (id) => {
-    setIsProcessingOCR(id);
+  const handleRunOCR = async (doc) => {
+    if (!canRequestOCR(doc)) {
+      setError('Este documento ya tiene texto almacenado. Solo se permite reprocesar los que siguen vacíos.');
+      setSuccessMessage('');
+      return;
+    }
+
+    setIsProcessingOCR(doc.id);
     setError('');
     setSuccessMessage('');
     try {
-      const res = await axios.post(`/api/documents/${id}/run-ocr`);
+      const res = await axios.post(`/api/documents/${doc.id}/run-ocr`);
       // Refresh the document list to show the new content
-      await fetchDocuments(); 
+      await fetchDocuments();
       setSuccessMessage(res.data.message || "OCR procesado con éxito.");
       // If the processed document is expanded, update its content view
-      if (expandedId === id) {
+      if (expandedId === doc.id) {
         const updatedDoc = res.data.content;
         setCurrentContent(updatedDoc?.trim() ? updatedDoc : EMPTY_CONTENT_MESSAGE);
       }
     } catch (err) {
       console.error("Error running OCR:", err);
-      setError(err.response?.data?.details || "Falló el procesamiento OCR.");
+      const apiMessage = err.response?.data?.details || err.response?.data?.error || "Falló el procesamiento OCR.";
+      if (err.response?.status === 404) {
+        setError(`${apiMessage} Sube nuevamente el PDF para regenerar el vínculo entre la base de datos y el archivo en Firebase Storage.`);
+      } else {
+        setError(apiMessage);
+      }
     } finally {
       setIsProcessingOCR(null);
     }
@@ -186,17 +229,27 @@ export default function DocumentsPage() {
                   <div>
                     <h3>{doc.title}</h3>
                     <p>Subido por {doc.uploaded_by} el {doc.upload_date}</p>
+                    <p className={styles.fileMeta}>
+                      <span className={styles.fileTag}>Servidor: {doc.filename}</span>
+                      {doc.original_filename && doc.original_filename !== doc.filename && (
+                        <span className={styles.fileTag}>Original: {doc.original_filename}</span>
+                      )}
+                    </p>
                   </div>
                   <div className={styles.actions}>
                     <button onClick={() => toggleExpand(doc)} className={styles.secondaryButton}>
                       {expandedId === doc.id ? "Ver menos" : "Ver más"}
                     </button>
                     <button
-                      onClick={() => handleRunOCR(doc.id)}
+                      onClick={() => handleRunOCR(doc)}
                       className={styles.primaryButton}
-                      disabled={isProcessingOCR === doc.id}
+                      disabled={isProcessingOCR === doc.id || !canRequestOCR(doc)}
                     >
-                      {isProcessingOCR === doc.id ? 'Procesando...' : 'Procesar OCR'}
+                      {isProcessingOCR === doc.id
+                        ? 'Procesando...'
+                        : canRequestOCR(doc)
+                        ? 'Procesar OCR'
+                        : 'OCR actualizado'}
                     </button>
                     <Link href={`/documents/${doc.id}`} legacyBehavior>
                       <a className={styles.ghostButton}>Ver detalles</a>
@@ -208,8 +261,14 @@ export default function DocumentsPage() {
                     )}
                   </div>
                 </div>
+                <div className={styles.statusRow}>
+                  <div className={styles.statusBadges}>{renderStatusBadges(doc)}</div>
+                  {doc.ocr_message && (
+                    <p className={styles.statusMessage}>{doc.ocr_message}</p>
+                  )}
+                </div>
                 {(!doc.content || !doc.content.trim()) && (
-                  <p className={styles.notice}>No se ha extraído texto todavía. Ejecuta el OCR para intentarlo.</p>
+                  <p className={styles.notice}>{doc.ocr_message || 'No se ha extraído texto todavía. Ejecuta el OCR para intentarlo.'}</p>
                 )}
                 {expandedId === doc.id && (
                   <div className={styles.contentBox}>

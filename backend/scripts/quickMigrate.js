@@ -44,6 +44,57 @@ const pool = new Pool({
       END $$;
     `);
 
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns WHERE table_name = 'documents' AND column_name = 'has_text'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN has_text BOOLEAN DEFAULT FALSE;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns WHERE table_name = 'documents' AND column_name = 'ocr_used'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN ocr_used BOOLEAN DEFAULT FALSE;
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns WHERE table_name = 'documents' AND column_name = 'ocr_status'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN ocr_status VARCHAR(50) DEFAULT 'pending';
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns WHERE table_name = 'documents' AND column_name = 'ocr_message'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN ocr_message TEXT;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns WHERE table_name = 'documents' AND column_name = 'original_filename'
+        ) THEN
+          ALTER TABLE documents ADD COLUMN original_filename TEXT;
+        END IF;
+      END $$;
+    `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.tables WHERE table_name = 'normative_texts'
+        ) THEN
+          CREATE TABLE normative_texts (
+            id SERIAL PRIMARY KEY,
+            document_id INT UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+        END IF;
+      END $$;
+    `);
+
     console.log("✅ Migración aplicada correctamente");
   } catch (e) {
     console.error("❌ Error en migración:", e.message);

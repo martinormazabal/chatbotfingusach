@@ -70,7 +70,20 @@ CREATE TABLE IF NOT EXISTS documents (
   content TEXT NOT NULL,
   uploaded_by VARCHAR(100) NOT NULL,
   filename TEXT NOT NULL,
-  upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  original_filename TEXT,
+  upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  has_text BOOLEAN DEFAULT FALSE,
+  ocr_used BOOLEAN DEFAULT FALSE,
+  ocr_status VARCHAR(50) DEFAULT 'pending',
+  ocr_message TEXT
+);
+
+CREATE TABLE IF NOT EXISTS normative_texts (
+  id SERIAL PRIMARY KEY,
+  document_id INT UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -146,6 +159,9 @@ GRANT USAGE, SELECT ON SEQUENCE evaluation_logs_id_seq TO chatbotuser;
 -- Columnas requeridas por el backend reciente
 ALTER TABLE documents
   ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS original_filename TEXT;
 
 ALTER TABLE requests
   ADD COLUMN IF NOT EXISTS context TEXT;

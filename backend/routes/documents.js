@@ -89,6 +89,19 @@ async function enhancedOCRProcessing(filePath, originalFilename) {
   }
 }
 
+async function upsertNormativeContent(documentId, content) {
+  if (!documentId || !content) return null;
+
+  return pool.query(
+    `INSERT INTO normative_texts (document_id, content)
+     VALUES ($1, $2)
+     ON CONFLICT (document_id)
+     DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+     RETURNING document_id`,
+    [documentId, content]
+  );
+}
+
 // Upload route is safe and does not perform OCR automatically.
 router.post('/upload', upload.single('document'), async (req, res) => {
   if (!req.file) {
@@ -100,6 +113,8 @@ router.post('/upload', upload.single('document'), async (req, res) => {
     const ocrMetadata = {
       attempted: false,
       succeeded: false,
+      used: false,
+      status: 'pending',
       message: ''
     };
 
@@ -110,6 +125,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
       if (extractedText) {
         ocrMetadata.message = 'Se detectó texto incrustado en el PDF. No fue necesario ejecutar OCR.';
         ocrMetadata.succeeded = true;
+        ocrMetadata.status = 'embedded-text';
       }
     } catch (parseError) {
       console.warn('Fallo al extraer texto incrustado con pdf-parse. Se intentará OCR.', parseError);
@@ -126,24 +142,32 @@ router.post('/upload', upload.single('document'), async (req, res) => {
       } catch (ocrError) {
         console.error('Error ejecutando OCR durante la subida del documento:', ocrError);
         ocrMetadata.succeeded = false;
+        ocrMetadata.status = 'ocr-failed';
         ocrMetadata.message = 'No fue posible extraer texto automáticamente. Puede ejecutar el OCR manualmente desde la interfaz.';
       }
     }
 
     const cleanedText = improveTextLegibility(extractedText);
+    const hasText = Boolean(cleanedText);
+    const ocrUsed = Boolean(ocrMetadata.used || (ocrMetadata.attempted && ocrMetadata.succeeded));
 
     let result;
     try {
       result = await pool.query(
-        `INSERT INTO documents (title, content, uploaded_by, filename, source_url)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, title, upload_date, filename, source_url`,
+        `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, title, upload_date, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message`,
         [
           req.body.title || req.file.originalname,
           cleanedText,
           req.body.uploaded_by || 'Anónimo',
           req.file.filename,
-          req.body.source_url || null
+          req.body.originalname,
+          req.body.source_url || null,
+          hasText,
+          ocrUsed,
+          ocrMetadata.status,
+          ocrMetadata.message
         ]
       );
     } catch (err) {
@@ -165,7 +189,17 @@ router.post('/upload', upload.single('document'), async (req, res) => {
       }
     }
 
-    res.status(201).json({ success: true, document: result.rows[0], ocr: ocrMetadata });
+    const storedDoc = {
+      ...result.rows[0],
+      original_filename: result.rows[0].original_filename || req.file.originalname
+    };
+    if (hasText) {
+      await upsertNormativeContent(storedDoc.id, cleanedText).catch(err =>
+        console.warn('No se pudo guardar el texto en normative_texts:', err.message)
+      );
+    }
+
+    res.status(201).json({ success: true, document: storedDoc, ocr: ocrMetadata });
   } catch (error) {
     console.error(`Error en la ruta de subida: ${error.stack}`);
     await fs.unlink(req.file.path).catch(e => console.error("Error al limpiar archivo temporal después de un error:", e));
@@ -178,46 +212,120 @@ router.post('/upload', upload.single('document'), async (req, res) => {
 
 // New route to run OCR on-demand.
 router.post('/:id/run-ocr', async (req, res) => {
+  const { id } = req.params;
   try {
-    const { createWorker } = await import('tesseract.js'); // o requiere aquí
-    const { fromPath } = require("pdf2pic");
-
-    const { id } = req.params;
-    const docResult = await pool.query('SELECT filename FROM documents WHERE id = $1', [id]);
+    
+    const docResult = await pool.query(
+      'SELECT filename, original_filename FROM documents WHERE id = $1',
+      [id]
+    );
     if (docResult.rowCount === 0) {
       return res.status(404).json({ error: 'Documento no encontrado' });
     }
     const filename = docResult.rows[0].filename;
-    const filePath = path.join(uploadDir, filename);
+    const originalFilename = docResult.rows[0].original_filename || filename;
+
+    let filePath = path.join(uploadDir, filename);
+    const storedFileExists = await fs.access(filePath).then(() => true).catch(() => false);
+    if (!storedFileExists) {
+      const altPath = path.join(uploadDir, originalFilename);
+      const altExists = await fs.access(altPath).then(() => true).catch(() => false);
+      if (!altExists) {
+        return res.status(404).json({
+          error: 'Archivo no encontrado en el servidor',
+          details: `No se halló el PDF esperado (${filename}) ni su nombre original (${originalFilename}). Vuelva a subirlo para ejecutar OCR.`
+        });
+      }
+      filePath = altPath;
+    }
 
     const extractedText = await enhancedOCRProcessing(filePath, filename);
     const cleanedText = improveTextLegibility(extractedText);
+    const hasCleanText = Boolean(cleanedText);
+    const finalStatus = hasCleanText ? 'ocr-success' : 'ocr-empty';
+    const finalMessage = hasCleanText
+      ? 'Texto extraído correctamente mediante OCR a solicitud manual.'
+      : 'OCR completado, pero no se encontraron caracteres legibles en el PDF.';
 
     const updatedDoc = await pool.query(
-      'UPDATE documents SET content = $1 WHERE id = $2 RETURNING id, content',
-      [cleanedText.trim(), id]
+      `UPDATE documents
+       SET content = $1,
+           has_text = $2,
+           ocr_used = true,
+           ocr_status = $3,
+           ocr_message = $4,
+           upload_date = upload_date
+       WHERE id = $5
+       RETURNING id, content`,
+       [cleanedText.trim(), hasCleanText, finalStatus, finalMessage, id]
     );
 
-    res.status(200).json({ 
-        success: true, 
+    if (hasCleanText) {
+      await upsertNormativeContent(id, cleanedText.trim()).catch(err =>
+        console.warn('No se pudo actualizar normative_texts tras OCR manual:', err.message)
+      );
+    }
+
+    res.status(200).json({
+        success: true,
         message: 'OCR procesado y guardado correctamente.',
         content: updatedDoc.rows[0].content
     });
   } catch (e) {
+    if (id) {
+      await pool.query(
+        `UPDATE documents
+         SET ocr_status = 'ocr-failed',
+             ocr_message = $2
+         WHERE id = $1`,
+         [id, e.message || 'OCR no disponible o falló durante la ejecución.']
+      ).catch(() => {});
+    }
     return res.status(500).json({ error: 'OCR no disponible en este entorno', details: e.message });
   }
 });
 
 router.get('/', async (req, res) => {
   try {
-    const { rows } = await pool.query(`
-        SELECT id, title, uploaded_by, content, 
-               TO_CHAR(upload_date, 'DD/MM/YYYY HH24:MI') AS upload_date,
-               filename
-        FROM documents
-        ORDER BY upload_date DESC
-    `);
-    res.status(200).json(rows || []);
+    try {
+      const { rows } = await pool.query(`
+          SELECT id, title, uploaded_by, content,
+                 COALESCE(original_filename, filename) AS original_filename,
+                 COALESCE(has_text, false) AS has_text,
+                 COALESCE(ocr_used, false) AS ocr_used,
+                 COALESCE(ocr_status, 'pending') AS ocr_status,
+                 COALESCE(ocr_message, '') AS ocr_message,
+                 TO_CHAR(upload_date, 'DD/MM/YYYY HH24:MI') AS upload_date,
+                 filename
+          FROM documents
+          ORDER BY upload_date DESC
+      `);
+      return res.status(200).json(rows || []);
+    } catch (error) {
+      // If the new OCR columns do not exist, fall back to the legacy shape
+      if (String(error.code) !== '42703') {
+        throw error;
+      }
+
+      const { rows } = await pool.query(`
+          SELECT id, title, uploaded_by, content,
+                 TO_CHAR(upload_date, 'DD/MM/YYYY HH24:MI') AS upload_date,
+                 filename
+          FROM documents
+          ORDER BY upload_date DESC
+      `);
+
+      const hydrated = rows.map((row) => ({
+        ...row,
+        original_filename: row.filename,
+        has_text: Boolean(row.content),
+        ocr_used: false,
+        ocr_status: 'pending',
+        ocr_message: ''
+      }));
+
+      return res.status(200).json(hydrated);
+    }
   } catch (error) {
     console.error('Error obteniendo documentos:', error);
     res.status(500).json({ error: 'Error al obtener documentos', details: error.message });
