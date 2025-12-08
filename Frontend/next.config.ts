@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  /* config options here */
-};
+// Reexporta la configuración real definida en next.config.js para evitar
+// divergencias entre archivos de configuración.
+const config: NextConfig = require("./next.config.js");
 
-export default nextConfig;
+export default config;

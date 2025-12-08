@@ -126,9 +126,39 @@ const initialize = async () => {
 
     const uploadDir = path.join(__dirname, 'uploads');
     // Middlewares
-    app.use(cors({
-      origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    }));
+    const allowedOrigins = new Set(
+      (process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS || "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+    );
+    allowedOrigins.add("http://localhost:3000");
+
+    const corsOptions = {
+      origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.has(origin)) return callback(null, true);
+
+        try {
+          const hostname = new URL(origin).hostname;
+          
+          if (
+            hostname.endsWith("cloudworkstations.dev") ||
+            hostname.endsWith("web.app") ||
+            hostname.endsWith("firebaseapp.com")
+          ) {
+            return callback(null, true);
+          }
+        } catch (parseError) {
+          console.warn("Origen de CORS inválido recibido:", origin, parseError.message);
+          return callback(new Error("Solicitud bloqueada por CORS"));
+        }
+
+        return callback(new Error("Solicitud bloqueada por CORS"));
+      },
+    };
+
+    app.use(cors(corsOptions));
     app.use('/uploads', express.static(uploadDir));
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));

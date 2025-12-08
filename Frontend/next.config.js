@@ -16,12 +16,27 @@ const allowedDevOrigins = (() => {
   const origins = new Set(parseOrigins(process.env.NEXT_ALLOWED_DEV_ORIGINS));
 
   origins.add("http://localhost:3000");
-  origins.add("https://*.cloudworkstations.dev");
+  // Los patrones comodín no son aceptados por Next.js, por lo que usamos
+  // expresiones regulares para abarcar los dominios efímeros de cloudworkstations.
+  const cloudWorkstationPattern = /^https?:\/\/[\w.-]*\.cloudworkstations\.dev$/;
+  origins.add(cloudWorkstationPattern);
+
+  // Permite inyectar explícitamente un origen concreto en entornos no previstos.
+  const explicitDevOrigin = sanitizeBaseUrl(process.env.NEXT_DEV_ORIGIN);
+  if (explicitDevOrigin) {
+    origins.add(explicitDevOrigin);
+  }
 
   return Array.from(origins);
 })();
 
+const uploadBodySizeLimit = 50 * 1024 * 1024; // 50 MB
+
 module.exports = {
+  // Permite subir PDFs pesados sin que Next.js trunque el cuerpo a 10 MB
+  middlewareClientMaxBodySize: uploadBodySizeLimit,
+    // Evita advertencias de origen cruzado en desarrollo para los dominios permitidos
+  allowedDevOrigins,
   async rewrites() {
     return process.env.NODE_ENV === "development"
       ? [

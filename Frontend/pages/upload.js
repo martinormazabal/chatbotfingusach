@@ -5,13 +5,29 @@ import styles from './upload.module.css';
 export default function DocumentUpload() {
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
-    const [feedback, setFeedback] = useState({ type: '', text: '' });
+  const [feedback, setFeedback] = useState({ type: '', text: '' });
   const [isLoading, setIsLoading] = useState(false);
+
+  const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+  const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
+
+  const uploadEndpoint = useMemo(() => {
+    const base = (process.env.NEXT_PUBLIC_BACKEND_URL || '').replace(/\/$/, '');
+    return base ? `${base}/api/documents/upload` : '/api/documents/upload';
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) {
       setFeedback({ type: 'error', text: 'Por favor, seleccione un archivo para subir.' });
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setFeedback({
+        type: 'error',
+        text: `El archivo supera el límite permitido de ${MAX_UPLOAD_MB} MB. Redúcelo o divídelo antes de intentarlo nuevamente.`
+      });
       return;
     }
 
@@ -27,7 +43,7 @@ export default function DocumentUpload() {
       formData.append('document', file);
       formData.append('title', title);
 
-      const response = await fetch('/api/documents/upload', {
+      const response = await fetch(uploadEndpoint, {
         method: 'POST',
         body: formData,
         signal: controller.signal
@@ -36,16 +52,28 @@ export default function DocumentUpload() {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 413) {
+          throw new Error(`El archivo excede el límite de ${MAX_UPLOAD_MB} MB permitido por el servidor.`);
+        }
+
         let errorDetails = `Error del servidor: ${response.status}`;
         try {
           // El servidor PUEDE responder con un JSON de error estructurado.
-          const errorJson = await response.json();
-          errorDetails = errorJson.details || errorJson.error || 'Error desconocido en la respuesta de la API.';
+          const errorJson = await response.clone().json();
+          errorDetails =
+            errorJson.details ||
+            errorJson.error ||
+            errorJson.message ||
+            'Error desconocido en la respuesta de la API.';
         } catch (jsonError) {
-          // Si el parseo JSON falla, la respuesta no era JSON (ej. un error 502/504 de gateway).
-          const responseText = await response.text();
-          errorDetails = `La comunicación con el servidor falló: ${response.status} ${response.statusText}. Respuesta: ${responseText.substring(0, 100)}...`;
-          console.error("La respuesta de error no era JSON. Contenido:", responseText);
+          try {
+            const responseText = await response.text();
+            errorDetails = `La comunicación con el servidor falló: ${response.status} ${response.statusText}. Respuesta: ${responseText.substring(0, 160)}...`;
+            console.error('La respuesta de error no era JSON. Contenido:', responseText);
+          } catch (readError) {
+            console.error('No se pudo leer el cuerpo de la respuesta de error', readError);
+            errorDetails = 'La comunicación con el servidor falló y no fue posible leer la respuesta de error.';
+          }
         }
         throw new Error(errorDetails);
       }
@@ -116,6 +144,7 @@ export default function DocumentUpload() {
         </p>
         <ul>
           <li>Formatos aceptados: PDF.</li>
+          <li>Tamaño máximo recomendado: {MAX_UPLOAD_MB} MB.</li>
           <li>Tiempo estimado: hasta 5 minutos por OCR.</li>
           <li>No cierres la ventana hasta recibir confirmación.</li>
         </ul>
