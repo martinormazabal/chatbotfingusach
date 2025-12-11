@@ -150,20 +150,23 @@ router.post('/upload', upload.single('document'), async (req, res) => {
     const cleanedText = improveTextLegibility(extractedText);
     const hasText = Boolean(cleanedText);
     const ocrUsed = Boolean(ocrMetadata.used || (ocrMetadata.attempted && ocrMetadata.succeeded));
+    const title = req.body.title || req.file.originalname;
+    const uploadedBy = req.body.uploaded_by || 'Anónimo';
+    const sourceUrl = req.body.source_url || null;
 
     let result;
     try {
       result = await pool.query(
-        `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id, title, upload_date, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message`,
+        `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, source_url, has_text, ocr_used, ocr_status, ocr_message)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id, title, upload_date, filename, original_filename, source_url, has_text, ocr_used, ocr_status, ocr_message`,
         [
-          req.body.title || req.file.originalname,
+          title,
           cleanedText,
-          req.body.uploaded_by || 'Anónimo',
+          uploadedBy,
           req.file.filename,
-          req.body.originalname,
-          req.body.source_url || null,
+          req.file.originalname,
+          sourceUrl,
           hasText,
           ocrUsed,
           ocrMetadata.status,
@@ -171,24 +174,42 @@ router.post('/upload', upload.single('document'), async (req, res) => {
         ]
       );
     } catch (err) {
-        // Si alguien no migró, cae aquí por columna inexistente: reintenta sin source_url pero conservando el resto de campos
+        // Fallback para esquemas antiguos sin columnas nuevas como original_filename, source_url o has_text
         if (String(err.code) === "42703") {
-          result = await pool.query(
-            `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING id, title, upload_date, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message`,
-          [
-            req.body.title || req.file.originalname,
-            cleanedText,
-            req.body.uploaded_by || 'Anónimo',
-            req.file.filename,
-            req.body.originalname,
-            hasText,
-            ocrUsed,
-            ocrMetadata.status,
-            ocrMetadata.message
-          ]
-        );
+          try {
+            result = await pool.query(
+              `INSERT INTO documents (title, content, uploaded_by, filename, has_text, ocr_used, ocr_status, ocr_message)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+              RETURNING id, title, upload_date, filename, has_text, ocr_used, ocr_status, ocr_message`,
+              [
+                title,
+                cleanedText,
+                uploadedBy,
+                req.file.filename,
+                hasText,
+                ocrUsed,
+                ocrMetadata.status,
+                ocrMetadata.message
+              ]
+            );
+          } catch (legacyErr) {
+            // Fallback mínimo cuando tampoco existen las columnas de OCR/has_text
+            if (String(legacyErr.code) === "42703") {
+              result = await pool.query(
+                `INSERT INTO documents (title, content, uploaded_by, filename)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, title, upload_date, filename`,
+                [
+                  title,
+                  cleanedText,
+                  uploadedBy,
+                  req.file.filename
+                ]
+              );
+            } else {
+              throw legacyErr;
+            }
+          }
       } else {
         throw err;
       }
@@ -196,7 +217,12 @@ router.post('/upload', upload.single('document'), async (req, res) => {
 
     const storedDoc = {
       ...result.rows[0],
-      original_filename: result.rows[0].original_filename || req.file.originalname
+      original_filename: result.rows[0].original_filename || req.file.originalname,
+      source_url: result.rows[0].source_url || sourceUrl,
+      has_text: typeof result.rows[0].has_text === 'boolean' ? result.rows[0].has_text : hasText,
+      ocr_used: typeof result.rows[0].ocr_used === 'boolean' ? result.rows[0].ocr_used : ocrUsed,
+      ocr_status: result.rows[0].ocr_status || ocrMetadata.status,
+      ocr_message: result.rows[0].ocr_message || ocrMetadata.message
     };
     if (hasText) {
       await upsertNormativeContent(storedDoc.id, cleanedText).catch(err =>
