@@ -20,20 +20,45 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'chatbotdb'
 });
 
+const RETRY_DELAY_MS = 5000;
+const MAX_RETRIES = Number(process.env.DB_MAX_RETRIES || 10);
+
+const waitForDatabase = async (retries = 0) => {
+  try {
+    await pool.query("SELECT 1");
+    return true;
+  } catch (error) {
+    if (retries >= MAX_RETRIES) {
+      console.error(`❌ No se pudo conectar a PostgreSQL tras ${retries} intentos:`, error.message);
+      return false;
+    }
+
+    const nextAttempt = retries + 1;
+    console.log(
+      `⏳ PostgreSQL no responde (intento ${nextAttempt}/${MAX_RETRIES}). Reintentando en ${
+        RETRY_DELAY_MS / 1000
+      }s...`
+    );
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    return waitForDatabase(nextAttempt);
+  }
+};
+
 // Ejecutar init.sql
 const initFilePath = path.resolve(__dirname, 'init.sql');
 
 const setup = async () => {
+  const dbReady = await waitForDatabase();
+  if (!dbReady) {
+    process.exit(1);
+  }
   try {
     const initSQL = fs.readFileSync(initFilePath, 'utf8');
     await pool.query(initSQL);
     console.log("✅ Repositorio instalado exitosamente");
   } catch (error) {
     // Si el error indica que ya existen objetos, asumimos que ya está instalado.
-    if (
-      error.message.includes("already exists") ||
-      error.message.includes("skipping")
-    ) {
+    if (error.message.includes("already exists") || error.message.includes("skipping")) {
       console.log("ℹ️ El repositorio ya está instalado");
     } else {
       console.error("❌ Error Setup:", error.message);

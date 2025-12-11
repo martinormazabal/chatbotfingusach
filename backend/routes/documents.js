@@ -171,17 +171,22 @@ router.post('/upload', upload.single('document'), async (req, res) => {
         ]
       );
     } catch (err) {
-      // Si alguien no migró, cae aquí por columna inexistente: reintenta sin source_url
-      if (String(err.code) === "42703") {
-        result = await pool.query(
-          `INSERT INTO documents (title, content, uploaded_by, filename)
-          VALUES ($1, $2, $3, $4)
-          RETURNING id, title, upload_date, filename`,
+        // Si alguien no migró, cae aquí por columna inexistente: reintenta sin source_url pero conservando el resto de campos
+        if (String(err.code) === "42703") {
+          result = await pool.query(
+            `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id, title, upload_date, filename, original_filename, has_text, ocr_used, ocr_status, ocr_message`,
           [
             req.body.title || req.file.originalname,
-            extractedText,
+            cleanedText,
             req.body.uploaded_by || 'Anónimo',
-            req.file.filename
+            req.file.filename,
+            req.body.originalname,
+            hasText,
+            ocrUsed,
+            ocrMetadata.status,
+            ocrMetadata.message
           ]
         );
       } else {
