@@ -41,6 +41,11 @@ module.exports = {
   turbopack: {
     root: __dirname,
   },
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
+  },
   async rewrites() {
     return process.env.NODE_ENV === "development"
       ? [

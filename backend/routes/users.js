@@ -353,7 +353,7 @@ router.all("/:id/role", (req, res) => {
 });
 
 // Ruta para cambiar la contraseña de un usuario
-router.post("/:id(\d+)/change-password", async (req, res) => {
+async function changeUserPassword(req, res) {
   const { id } = req.params;
   const { currentPassword, newPassword } = req.body;
 
@@ -414,7 +414,10 @@ Administración`,
     console.error("Error al cambiar la contraseña:", error);
     res.status(500).json({ message: "Error en el servidor" });
   }
-});
+}
+
+router.put("/:id(\\d+)/change-password", changeUserPassword);
+router.post("/:id(\\d+)/change-password", changeUserPassword);
 
 router.post("/password-reset/request", async (req, res) => {
   const { email } = req.body;
@@ -497,7 +500,15 @@ router.post("/password-reset/confirm", async (req, res) => {
     );
 
     const tokenRow = tokenResult.rows[0];
-    if (!tokenRow || new Date(tokenRow.expires_at) < new Date()) {
+    if (!tokenRow) {
+      return res.status(400).json({ message: "Token inválido o expirado" });
+    }
+
+    if (new Date(tokenRow.expires_at) < new Date()) {
+      await pool.query(
+        "UPDATE password_reset_tokens SET consumed_at = NOW(), updated_at = NOW() WHERE id = $1 AND consumed_at IS NULL",
+        [tokenRow.id]
+      );
       return res.status(400).json({ message: "Token inválido o expirado" });
     }
 
