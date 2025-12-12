@@ -89,17 +89,56 @@ async function enhancedOCRProcessing(filePath, originalFilename) {
   }
 }
 
+let normativeTableReady = false;
+
+async function ensureNormativeTable() {
+  if (normativeTableReady) return;
+  try {
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS normative_texts (
+         id SERIAL PRIMARY KEY,
+         document_id INT UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+         content TEXT NOT NULL,
+         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+       );`
+    );
+    normativeTableReady = true;
+  } catch (err) {
+    console.warn("⚠️  No se pudo garantizar la tabla normative_texts:", err.message);
+  }
+}
+
 async function upsertNormativeContent(documentId, content) {
   if (!documentId || !content) return null;
 
-  return pool.query(
-    `INSERT INTO normative_texts (document_id, content)
-     VALUES ($1, $2)
-     ON CONFLICT (document_id)
-     DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
-     RETURNING document_id`,
-    [documentId, content]
-  );
+  await ensureNormativeTable();
+
+  try {
+    return await pool.query(
+      `INSERT INTO normative_texts (document_id, content)
+       VALUES ($1, $2)
+       ON CONFLICT (document_id)
+       DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+       RETURNING document_id`,
+      [documentId, content]
+    );
+  } catch (err) {
+    // Si la tabla no existe y no pudo crearse antes, intenta crearla en caliente.
+    if (String(err.code) === "42P01") {
+      normativeTableReady = false;
+      await ensureNormativeTable();
+      return await pool.query(
+        `INSERT INTO normative_texts (document_id, content)
+         VALUES ($1, $2)
+         ON CONFLICT (document_id)
+         DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+         RETURNING document_id`,
+        [documentId, content]
+      );
+    }
+    throw err;
+  }
 }
 
 // Upload route is safe and does not perform OCR automatically.

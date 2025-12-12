@@ -237,13 +237,14 @@ async function tryChatWithModel(modelName, { query, contextBlocks, history }) {
     const contextText = formatContextForPrompt(contextBlocks);
 
     const guidance = contextBlocks?.length
-      ? "Responde SOLO con lo sustentado en el contexto. Si falta un detalle, indícalo y orienta con la fuente."
+      ? "Responde SOLO con lo sustentado en el contexto. Aunque el detalle sea breve, afirma lo que sí está respaldado y cita la fuente. Si falta algo, indícalo sin descartar lo que ya existe."
       : "El contexto es débil. Da una definición breve, sin inventar normativa, y orienta a fuentes oficiales.";
 
-      const responseFormat = `Formato de respuesta:
-      - Resumen: limita a 2-3 frases.
-      - Fundamento normativo: cita artículo/sección y documento fuente (ej: Artículo 5, Reglamento de Convivencia USACH).
-      - Pasos sugeridos: 2-4 pasos accionables para el estudiante.`;
+      const responseFormat = `Formato de respuesta (respeta exactamente los encabezados):
+      - Resumen: limita a 2-3 frases con la mejor respuesta posible según el contexto.
+      - Fundamento normativo: cita artículo/sección y documento fuente (ej: Artículo 5, Reglamento de Convivencia USACH). Si no hay número explícito, usa la referencia textual disponible.
+      - Pasos sugeridos: 2-4 pasos accionables para el estudiante.
+      - Documento y referencia: lista breve por cada fuente usada en la respuesta con el formato "Documento: <título> | Referencia: <artículo/sección o descripción del extracto>".`;
     
     const systemPreamble = `
 Eres un asistente de normativa de la Universidad de Santiago de Chile (USACH).
@@ -267,7 +268,7 @@ ${responseFormat}
 
     // Nota: El SDK de Node no soporta `signal` en `sendMessage`. Se maneja con el timeout.
     const prompt = `Pregunta del estudiante: ${query}\n\nContexto relevante:\n${contextText}\n\nRecuerda mantener el formato indicado.`;
-    const result = await chat.sendMessage(query);
+    const result = await chat.sendMessage(prompt);
     const text = typeof result?.response?.text === "function" ? result.response.text() : "";
     return { text: text?.trim() || "No se obtuvo texto del modelo.", modelName };
   } catch (err) {
@@ -325,8 +326,39 @@ router.post("/chatbot", async (req, res) => {
   const { query, history = [] } = req.body;
   if (!query?.trim()) return res.status(400).json({ error: "Empty query" });
 
+  const startedAt = Date.now();
+
   try {
     const { docs, mode } = await retrieveContext(query);
+
+    if (!docs.length) {
+      const fallback = {
+        answer:
+          "Solo puedo responder consultas sobre normativa y procedimientos de la USACH/FING. No encuentro fuentes para esta pregunta.",
+        sources: [],
+        model: "guardrail/offline",
+      };
+      try {
+        await pool.query(
+          `INSERT INTO evaluation_logs (case_id, fecha, rol_usuario, pregunta_textual, referencia_esperada_o_fuente, respuesta_chatbot, juicio_correctitud, tiempo_respuesta_ms, tipo_error, observaciones)
+           VALUES ($1, NOW(), $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            `${Date.now()}`,
+            req.user?.role || null,
+            query,
+            "Sin contexto normativo localizado",
+            fallback.answer,
+            "Correcta",
+            Date.now() - startedAt,
+            "sin_fuentes",
+            `modo=${mode}`,
+          ]
+        );
+      } catch (logErr) {
+        console.warn("⚠️  No se pudo registrar el log de evaluación (fallback):", logErr.message);
+      }
+      return res.json(fallback);
+    }
 
     const origin = process.env.BACKEND_ORIGIN || "http://localhost:5000";
     const appOrigin = process.env.APP_ORIGIN || process.env.FRONTEND_URL || "http://localhost:3000";
@@ -357,6 +389,25 @@ router.post("/chatbot", async (req, res) => {
     } catch (persistErr) {
       console.warn("⚠️  No se pudo registrar la solicitud en la BD:", persistErr.message);
     }
+    try {
+      await pool.query(
+        `INSERT INTO evaluation_logs (case_id, fecha, rol_usuario, pregunta_textual, referencia_esperada_o_fuente, respuesta_chatbot, juicio_correctitud, tiempo_respuesta_ms, tipo_error, observaciones)
+         VALUES ($1, NOW(), $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          `${Date.now()}`,
+          req.user?.role || null,
+          query,
+          contextBlocks.map((b, i) => `[#${i + 1}] ${b.title}`).join(" | ") || null,
+          aiResponse,
+          docs.length ? "Correcta" : "Parcial",
+          Date.now() - startedAt,
+          docs.length ? null : "contexto_debil",
+          `modo=${mode};modelo=${resolvedModel || MODEL_FALLBACKS[0]}`,
+        ]
+      );
+    } catch (logErr) {
+      console.warn("⚠️  No se pudo registrar el log de evaluación:", logErr.message);
+    }
 
     return res.json({ answer: aiResponse, sources, model: resolvedModel || MODEL_FALLBACKS[0] });
 
@@ -366,9 +417,43 @@ router.post("/chatbot", async (req, res) => {
   }
 });
 
-// Endpoints /log, /stats, etc (sin cambios)
-router.post("/log", async (req, res) => { 
-    // ... (código existente sin cambios)
+// Endpoint para registrar evaluaciones manuales desde el frontend
+router.post("/log", async (req, res) => {
+  const {
+    case_id,
+    rol_usuario,
+    pregunta_textual,
+    referencia_esperada_o_fuente,
+    respuesta_chatbot,
+    juicio_correctitud,
+    tiempo_respuesta_ms,
+    tipo_error,
+    observaciones,
+  } = req.body || {};
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO evaluation_logs (case_id, fecha, rol_usuario, pregunta_textual, referencia_esperada_o_fuente, respuesta_chatbot, juicio_correctitud, tiempo_respuesta_ms, tipo_error, observaciones)
+       VALUES ($1, NOW(), $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        case_id || `${Date.now()}`,
+        rol_usuario || req.user?.role || null,
+        pregunta_textual || null,
+        referencia_esperada_o_fuente || null,
+        respuesta_chatbot || null,
+        juicio_correctitud || null,
+        tiempo_respuesta_ms || null,
+        tipo_error || null,
+        observaciones || null,
+      ]
+    );
+
+    return res.status(201).json({ success: true, log: result.rows[0] });
+  } catch (error) {
+    console.error("❌ Error registrando evaluation_log:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 async function retrieveContext(query) {
