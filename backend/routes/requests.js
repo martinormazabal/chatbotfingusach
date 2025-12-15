@@ -185,8 +185,9 @@ if (GEMINI_API_KEY) {
 }
 
 // 3.2) Lista de modelos viables (sólo los que sabes que tu cuenta soporta)
-// 3.2) Lista de modelos viables (configurable por env GEMINI_MODELS="modelo1,modelo2")
+// (configurable por env GEMINI_MODELS="modelo1,modelo2")
 const DEFAULT_MODELS = [
+  "gemini-3-pro-preview",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
   "gemini-2.0-flash",

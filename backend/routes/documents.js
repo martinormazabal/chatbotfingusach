@@ -21,7 +21,12 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50 MB para PDFs grandes
+  }
+});
 
 function improveTextLegibility(text = "") {
   if (!text) return "";
@@ -141,8 +146,26 @@ async function upsertNormativeContent(documentId, content) {
   }
 }
 
+const uploadMiddleware = (req, res, next) => {
+  upload.single('document')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({
+        error: 'Error al procesar el archivo',
+        details: err.code === 'LIMIT_FILE_SIZE'
+          ? 'El archivo supera el límite de 50 MB permitido por el servidor.'
+          : err.message
+      });
+    }
+    if (err) {
+      return next(err);
+    }
+    next();
+  });
+};
+
 // Upload route is safe and does not perform OCR automatically.
-router.post('/upload', upload.single('document'), async (req, res) => {
+router.post('/upload', uploadMiddleware, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Archivo no recibido' });
   }

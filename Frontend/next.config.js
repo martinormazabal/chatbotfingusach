@@ -1,36 +1,74 @@
 const sanitizeBaseUrl = (url = "") =>
   typeof url === "string" ? url.trim().replace(/\/$/, "") : "";
 
+// Evita que advertencias conocidas saturen la consola de desarrollo.
+// Next.js emite repetidamente "Warning: Ran out of space in font private use area" al
+// trabajar con ciertas fuentes de PDF; el hook hace que solo se registre una vez.
+const muteKnownWarnings = () => {
+  if (process.env.NODE_ENV !== "development") return;
+
+  const originalWarn = console.warn;
+  const seen = new Set();
+  console.warn = (...args) => {
+    const message = args.join(" ");
+
+    if (message.includes("Ran out of space in font private use area")) {
+      if (seen.has("font-private-use")) return;
+      seen.add("font-private-use");
+    }
+
+    originalWarn(...args);
+  };
+};
+
 const parseOrigins = (value = "") =>
   value
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+const parseBytes = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+
+  const numeric = parseFloat(value);
+  if (!Number.isFinite(numeric)) return null;
+
+  const lower = value.trim().toLowerCase();
+  if (lower.endsWith("kb")) return Math.floor(numeric * 1024);
+  if (lower.endsWith("mb")) return Math.floor(numeric * 1024 * 1024);
+  if (lower.endsWith("gb")) return Math.floor(numeric * 1024 * 1024 * 1024);
+
+  return Math.floor(numeric);
+};
+
 const backendOrigin =
   sanitizeBaseUrl(process.env.NEXT_PUBLIC_BACKEND_URL) ||
   sanitizeBaseUrl(process.env.BACKEND_URL) ||
   `http://localhost:${process.env.BACKEND_PORT || 5000}`;
+
+muteKnownWarnings();
+
+// Límite máximo permitido por el servidor de desarrollo de Next.js antes de reenviar la petición al backend.
+// Previene el error "Request body exceeded 10MB" al subir PDFs grandes vía proxy.
+const middlewareClientMaxBodySize =
+  parseBytes(process.env.NEXT_MIDDLEWARE_MAX_BODY_SIZE) || 50 * 1024 * 1024;
 
 const allowedDevOrigins = (() => {
   const origins = new Set(parseOrigins(process.env.NEXT_ALLOWED_DEV_ORIGINS));
 
   origins.add("http://localhost:3000");
   origins.add("http://127.0.0.1:3000");
-  // Los patrones comodín no son aceptados por Next.js, así que registramos explícitamente el dominio base y permitimos inyectar valores concretos via
-  // NEXT_ALLOWED_DEV_ORIGINS o NEXT_DEV_ORIGIN.
-  const cloudWorkstationPattern = /^https?:\/\/[\w.-]*\.cloudworkstations\.dev$/;
-  origins.add(cloudWorkstationPattern);
-  origins.add("https://cloudworkstations.dev");
 
-  // En algunos entornos el dominio expuesto cambia de forma impredecible (por ejemplo, cuando se usan túneles o puertos reexpuestos), lo que provoca que el origen real no coincida con el dominio comodín anterior y Next.js bloquee las peticiones a /_next/*. Para evitarlo, permitimos cualquier origen HTTP(S) en modo desarrollo; la opción solo se usa durante el hot-reload y no afecta a producción.
-  const catchAllDevOrigin = /^https?:\/\/[^\s]+$/;
-  origins.add(catchAllDevOrigin);
-
-  // Permite inyectar explícitamente un origen concreto en entornos no previstos.
   const explicitDevOrigin = sanitizeBaseUrl(process.env.NEXT_DEV_ORIGIN);
   if (explicitDevOrigin) {
     origins.add(explicitDevOrigin);
+  }
+
+  // Si se conoce el dominio público que expone el IDE (por ejemplo Cloud Workstations), se puede inyectar vía NEXT_PUBLIC_SITE_ORIGIN.
+  const publicDevOrigin = sanitizeBaseUrl(process.env.NEXT_PUBLIC_SITE_ORIGIN);
+  if (publicDevOrigin) {
+    origins.add(publicDevOrigin);
   }
 
   return Array.from(origins);
@@ -41,11 +79,7 @@ module.exports = {
   turbopack: {
     root: __dirname,
   },
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb',
-    },
-  },
+  middlewareClientMaxBodySize,
   async rewrites() {
     return process.env.NODE_ENV === "development"
       ? [
