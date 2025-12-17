@@ -59,6 +59,8 @@ const allowedDevOrigins = (() => {
 
   origins.add("http://localhost:3000");
   origins.add("http://127.0.0.1:3000");
+  origins.add("cloudworkstations.dev");
+  origins.add("*.cloudworkstations.dev");
 
   const explicitDevOrigin = sanitizeBaseUrl(process.env.NEXT_DEV_ORIGIN);
   if (explicitDevOrigin) {
@@ -84,9 +86,17 @@ module.exports = {
     return process.env.NODE_ENV === "development"
       ? [
           {
+            source: "/api/login",
+            destination: "/api/login",
+          },
+          {
             // Permite que las rutas Next.js bajo /api/users se resuelvan internamente (evita que el proxy las desvíe al backend directamente, lo que generaba respuestas HTML 404).
             source: "/api/users/:path*",
             destination: "/api/users/:path*",
+          },
+          {
+            source: "/api/requests/log",
+            destination: "/api/requests/log",
           },
           {
             source: "/api/:path*",

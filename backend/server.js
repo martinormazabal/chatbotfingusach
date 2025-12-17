@@ -167,6 +167,7 @@ const initialize = async () => {
     app.use("/api/users", require('./routes/users')); // Asegúrate que la ruta sea correcta
     app.use("/api/documents", require('./routes/documents'));
     app.use("/api/requests", require('./routes/requests'));
+    app.use("/api/auth", require("./routes/auth"));
 
        // Manejo de errores
        app.use((err, req, res, next) => {
