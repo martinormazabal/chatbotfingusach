@@ -1,7 +1,39 @@
-// frontend/pages/api/login.js
-const pool = require('../../../backend/db'); // Use require syntax
-import { notDeepEqual } from 'assert';
+import path from 'path';
 import bcrypt from 'bcrypt'; // Keep this import as bcrypt is likely an ES module or handles both
+import pool from '../../../backend/db.js';
+
+// Resolve the backend DB module by walking up from both __dirname and process.cwd(),
+// ensuring we can locate "backend/db.js" even when executed from the transpiled
+// .next output.
+const resolveBackendDbPath = () => {
+  const attempted = new Set();
+  const roots = [__dirname, process.cwd()];
+
+  for (const start of roots) {
+    let current = start;
+    while (true) {
+      const candidate = path.normalize(path.join(current, 'backend', 'db.js'));
+      if (!attempted.has(candidate)) {
+        attempted.add(candidate);
+        if (fs.existsSync(candidate)) {
+          return candidate;
+        }
+      }
+
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+
+  throw new Error(
+    `No se pudo ubicar backend/db.js para el pool de conexiones. Rutas probadas: ${Array.from(
+      attempted,
+    ).join(', ')}`,
+  );
+};
+
+const pool = require(resolveBackendDbPath());
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

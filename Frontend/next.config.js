@@ -103,4 +103,6 @@ module.exports = {
       allowedOrigins: allowedDevOrigins,
     },
   },
+  // Permite importar módulos que residen fuera del directorio Frontend (por ejemplo, "backend/db.js").
+  externalDir: true,
 };

@@ -1,7 +1,6 @@
-// backend/db.js
-const path = require("path");
+// frontend/lib/db.js
 const { Pool } = require("pg");
-require("dotenv").config({ path: path.resolve(__dirname, ".env") });
+require('dotenv').config({ path: '/.env' });
 
 // Configuración de la conexión a PostgreSQL
 const pool = new Pool({
