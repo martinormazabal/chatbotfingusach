@@ -120,13 +120,18 @@ CREATE TABLE IF NOT EXISTS evaluation_logs (
 
 
 -- Semilla admin (requiere pgcrypto, arriba creada)
+-- Asegurar el rol "admin" en la restricción de roles y el usuario admin
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users
+  ADD CONSTRAINT users_role_check
+  CHECK (role IN ('estudiante','funcionario','administrador de documentos','admin'));
 INSERT INTO users (username, email, password_hash, role)
-SELECT 'admin', 'admin@usach.cl', crypt('admin', gen_salt('bf')), 'admin'
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@usach.cl');
-SELECT to_regclass('public.evaluation_logs');   -- debe devolver 'evaluation_logs'
-SELECT COUNT(*) FROM evaluation_logs;
---  ('user2', 'user2@example.com', 'hashed_password_2', 'funcionario'),
---  ('user3', 'user3@example.com', 'hashed_password_3', 'administrador de documentos');
+VALUES ('admin', 'admin@usach.cl', crypt('admin', gen_salt('bf')), 'admin')
+ON CONFLICT (email) DO UPDATE
+SET
+  username = EXCLUDED.username,
+  role = EXCLUDED.role,
+  password_hash = crypt('admin', gen_salt('bf'));
 
 --INSERT INTO requests (user_id, query, response)
 --SELECT (SELECT id FROM users WHERE username = 'user1'), 'Solicitud de Cambio de Carrera', 'Permite solicitar…' UNION ALL
@@ -152,11 +157,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO chatbotuser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO chatbotuser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO chatbotuser;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE evaluation_logs TO chatbotuser;
-GRANT USAGE, SELECT ON SEQUENCE evaluation_logs_id_seq TO chatbotuser;
-
--- Columnas requeridas por el backend reciente
+@@ -160,26 +165,25 @@ GRANT USAGE, SELECT ON SEQUENCE evaluation_logs_id_seq TO chatbotuser;
 ALTER TABLE documents
   ADD COLUMN IF NOT EXISTS source_url TEXT;
 
@@ -182,4 +183,3 @@ CREATE INDEX IF NOT EXISTS idx_documents_content_trgm
 
 COMMIT;
 --Verificar permisos (opcional)
-

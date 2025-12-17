@@ -3,6 +3,7 @@ import React from 'react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import { can } from '../lib/rbac';
 import styles from './home.module.css';
 
 export default function Home() {
@@ -25,8 +26,10 @@ export default function Home() {
     return user.role.charAt(0).toUpperCase() + user.role.slice(1);
   }, [user?.role]);
 
-  const isAdminPrototype = user?.email === 'admin@usach.cl';
-  const role = user?.role;
+  const normalizedRole = useMemo(
+    () => (user?.role ? user.role.toLowerCase() : ''),
+    [user?.role]
+  );
 
   const displayName = useMemo(() => {
     if (!user?.username) return 'Usuario';
@@ -35,7 +38,7 @@ export default function Home() {
   }, [user?.username]);
 
   const visibility = useMemo(() => {
-    if (isAdminPrototype) {
+    if (!normalizedRole) {
       return {
         showUsers: true,
         showDocuments: true,
@@ -43,22 +46,14 @@ export default function Home() {
       };
     }
 
-    if (!role) {
-      return {
-        showUsers: false,
-        showDocuments: false,
-        showChatbot: false,
-      };
-    }
-
     const normalizedRole = role.toLowerCase();
 
     return {
-      showUsers: ['funcionario', 'admin'].includes(normalizedRole),
-      showDocuments: ['administrador de documentos', 'admin'].includes(normalizedRole),
-      showChatbot: ['estudiante', 'funcionario', 'administrador de documentos', 'admin'].includes(normalizedRole),
+      showUsers: can(normalizedRole, 'manage_users'),
+      showDocuments: can(normalizedRole, 'manage_docs'),
+      showChatbot: can(normalizedRole, 'chat'),
     };
-  }, [isAdminPrototype, role]);
+  }, [normalizedRole]);
 
   const emptyState = !user && (
     <section className={styles.section}>

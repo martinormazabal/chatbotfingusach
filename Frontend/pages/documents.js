@@ -2,6 +2,7 @@ import React from 'react';
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
+import { can } from "../lib/rbac";
 import styles from "./documents.module.css";
 
 export default function DocumentsPage() {
@@ -59,19 +60,14 @@ export default function DocumentsPage() {
     fetchDocuments();
   }, []);
 
-  const isAdminRole = useMemo(() => userRole?.toLowerCase() === 'admin', [userRole]);
-  const isDocumentAdmin = useMemo(
-    () => userRole?.toLowerCase() === 'administrador de documentos',
+  const normalizedRole = useMemo(
+    () => (userRole ? userRole.toLowerCase() : ''),
     [userRole]
-  );
-  const isPrototypeAdmin = useMemo(
-    () => userEmail?.toLowerCase() === 'admin@usach.cl',
-    [userEmail]
   );
 
   const canDeleteDocuments = useMemo(
-    () => isPrototypeAdmin || isAdminRole || isDocumentAdmin,
-    [isPrototypeAdmin, isAdminRole, isDocumentAdmin]
+    () => can(normalizedRole, "manage_docs"),
+    [normalizedRole]
   );
 
 
