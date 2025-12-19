@@ -133,6 +133,17 @@ function formatContextForPrompt(blocks = []) {
     .join("\n\n");
 }
 
+function buildContextBlocks(docs = []) {
+  return (docs || []).map((d) => {
+    const excerpt = formatExcerpt(d.excerpt) || "";
+    return {
+      title: d.title || "Documento",
+      excerpt,
+      references: detectReferences(excerpt || ""),
+    };
+  });
+}
+
 async function retrieveFromCache(query = "") {
   const docs = await loadDocumentsFromCache();
   if (!docs.length) return [];
@@ -187,6 +198,7 @@ if (GEMINI_API_KEY) {
 // 3.2) Lista de modelos viables (sólo los que sabes que tu cuenta soporta)
 // (configurable por env GEMINI_MODELS="modelo1,modelo2")
 const DEFAULT_MODELS = [
+  "gemini-3-flash-preview",
   "gemini-3-pro-preview",
   "gemini-2.5-flash",
   "gemini-2.5-pro",
@@ -219,8 +231,42 @@ function isModelNotFoundError(err) {
   return err?.status === 404 || msg.includes("not found") || msg.includes("no model") || msg.includes("unavailable");
 }
 
+function isRetryableGeminiError(err) {
+  if (!err) return false;
+  if (err.retryable) return true;
+  if (isModelNotFoundError(err)) return true;
+  const status = Number(err?.status || err?.code);
+  if ([408, 409, 429, 500, 502, 503, 504].includes(status)) return true;
+  const msg = String(err?.message || "").toLowerCase();
+  return (
+    err?.name === "AbortError" ||
+    msg.includes("timeout") ||
+    msg.includes("temporarily") ||
+    msg.includes("overloaded") ||
+    msg.includes("try again") ||
+    msg.includes("unavailable") ||
+    msg.includes("reset")
+  );
+}
+
+async function ensureContextBlocks(query = "", providedBlocks = []) {
+  if (Array.isArray(providedBlocks) && providedBlocks.length) return providedBlocks;
+
+  try {
+    const { docs } = await retrieveContext(query);
+    if (Array.isArray(docs) && docs.length) {
+      console.info("ℹ️  Contexto reconstruido desde la base de datos para la conversación.");
+      return buildContextBlocks(docs);
+    }
+  } catch (ctxErr) {
+    console.warn("⚠️  No se pudo regenerar el contexto antes de invocar Gemini:", ctxErr.message);
+  }
+
+  return Array.isArray(providedBlocks) ? providedBlocks : [];
+}
+
 // 3.3) Llamada protegida a Gemini con timeout
-async function tryChatWithModel(modelName, { query, contextBlocks, history }) {
+async function tryChatWithModel(modelName, { query, contextBlocks, history } = {}) {
   if (!genAI) {
     return { text: "⚠️ Servicio IA deshabilitado. Falta GEMINI_API_KEY.", modelName: "offline" };
   }
@@ -274,15 +320,20 @@ ${responseFormat}
     return { text: text?.trim() || "No se obtuvo texto del modelo.", modelName };
   } catch (err) {
     if (err?.name === "AbortError") {
-      return { text: "⌛ El modelo tardó demasiado en responder. Intenta de nuevo.", modelName };
+      const timeoutErr = new Error("⌛ El modelo tardó demasiado en responder.");
+      timeoutErr.retryable = true;
+      timeoutErr.modelName = modelName;
+      throw timeoutErr;
     }
+    err.retryable = err.retryable ?? isModelNotFoundError(err);
+    err.modelName = modelName;
     throw err; // se maneja en runChat
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function runChat(options) {
+async function runChat(options = {}) {
   // Modo sin IA (no te mato el backend nunca)
   if (!genAI) {
     return {
@@ -291,30 +342,33 @@ async function runChat(options) {
     };
   }
 
+  const { query = "", history = [] } = options;
+  const contextBlocks = await ensureContextBlocks(query, options.contextBlocks);
+
   let lastErr = null;
+  const attempts = [];
   for (const candidate of MODEL_FALLBACKS) {
     try {
-      const r = await tryChatWithModel(candidate, options);
+      const r = await tryChatWithModel(candidate, { query, contextBlocks, history });
       if (candidate !== MODEL_FALLBACKS[0]) {
         console.info(`ℹ️  Respuesta usando modelo alternativo: ${candidate}`);
       }
       return r;
     } catch (err) {
       lastErr = err;
-      if (!isModelNotFoundError(err)) {
-        // Error “real” (red, auth, etc.) → devuelvo mensaje amable sin matar backend
-        console.error(`❌ Error con modelo ${candidate}:`, err.message);
-        return {
-          text: `No fue posible obtener respuesta del modelo. Intenta nuevamente.`,
-          modelName: `error:${candidate}`
-        };
-      }
-      console.warn(`⚠️  Modelo no disponible: ${candidate}. Probando otro...`);
+      attempts.push({ model: candidate, message: err?.message });
+      const retryable = isRetryableGeminiError(err);
+      const reason = err?.message || "Error desconocido";
+      const logFn = isModelNotFoundError(err) ? console.warn : console.error;
+      logFn(`⚠️  Error con modelo ${candidate}: ${reason}. ${retryable ? "Probando siguiente fallback..." : "Se continuará con otros modelos para no interrumpir la respuesta."}`);
+      // Se sigue probando con el siguiente modelo aunque el error no sea “retriable” para mantener la rotación.
     }
   }
   // Si ninguno funcionó, devuelve mensaje claro (no throw → no 502)
+  const attemptedList = attempts.map((a) => a.model).join(", ") || "los modelos configurados";
+  const lastMessage = lastErr?.message ? ` Detalle: ${lastErr.message}` : "";
   return {
-    text: "No se encontró un modelo disponible en tu cuenta. Revisa los modelos activados en Google AI Studio.",
+    text: `No se encontró un modelo disponible en tu cuenta después de probar ${attemptedList}.${lastMessage}`.trim(),
     modelName: "no-models"
   };
 }
@@ -371,14 +425,7 @@ router.post("/chatbot", async (req, res) => {
         excerpt: formatExcerpt(d.excerpt),
     }));
 
-    const contextBlocks = docs.map(d => {
-      const excerpt = formatExcerpt(d.excerpt) || "";
-      return {
-        title: d.title || "Documento",
-        excerpt,
-        references: detectReferences(excerpt || ""),
-      };
-    });
+    const contextBlocks = buildContextBlocks(docs);
 
     const { text: aiResponse, modelName: resolvedModel } = await runChat({ query, contextBlocks, history });
 
@@ -453,6 +500,16 @@ router.post("/log", async (req, res) => {
     return res.status(201).json({ success: true, log: result.rows[0] });
   } catch (error) {
     console.error("❌ Error registrando evaluation_log:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get("/evaluation-logs", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM evaluation_logs ORDER BY fecha DESC");
+    return res.json(result.rows);
+  } catch (error) {
+    console.error("❌ Error obteniendo evaluation_logs:", error.message);
     return res.status(500).json({ success: false, error: error.message });
   }
 });
