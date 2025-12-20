@@ -19,10 +19,26 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let inMemoryDocCache = [];
 let lastCacheSync = 0;
 
+// Descripción: Limpia texto eliminando markdown y referencias internas para normalizar el contenido.
+// Entrada: text (string) a sanear antes de almacenarlo o procesarlo.
+// Salida: string sin referencias ni formato adicional, recortado.
+// Procesos:
+// 1. Validar que el texto sea string y devolver vacío en caso contrario.
+// 2. Remover coincidencias de CITATION_REGEX en el texto original.
+// 3. Aplicar remove-markdown y recortar espacios sobrantes.
+
 function sanitizeText(text = "") {
   if (typeof text !== "string") return "";
   return removeMd(text.replace(CITATION_REGEX, "")).trim();
 }
+
+// Descripción: Detecta referencias normativas comunes dentro de un texto dado.
+// Entrada: text (string) que puede contener artículos, capítulos o secciones.
+// Salida: Arreglo de referencias únicas encontradas.
+// Procesos:
+// 1. Definir patrones para artículos, capítulos y secciones en español.
+// 2. Ejecutar cada patrón y acumular coincidencias en un Set para evitar duplicados.
+// 3. Devolver las referencias normalizadas como arreglo.
 
 function detectReferences(text = "") {
   const refPatterns = [
@@ -41,6 +57,14 @@ function detectReferences(text = "") {
   return Array.from(refs);
 }
 
+// Descripción: Formatea un fragmento de texto sanitizado para usarlo como extracto legible.
+// Entrada: raw (string) con contenido original que puede incluir saltos o ruido.
+// Salida: Extracto acotado a 400 caracteres como máximo.
+// Procesos:
+// 1. Limpiar el texto con sanitizeText y compactar espacios.
+// 2. Verificar longitud y recortar con elipsis si supera 400 caracteres.
+// 3. Devolver el extracto listo para mostrarse en la respuesta.
+
 function formatExcerpt(raw = "") {
   const clean = sanitizeText(raw).replace(/\s+/g, " ").trim();
   if (!clean) return "";
@@ -48,6 +72,14 @@ function formatExcerpt(raw = "") {
 }
 
 // Funciones de cache (sin cambios)
+// Descripción: Refresca el caché de documentos desde la base de datos y lo guarda en disco.
+// Entrada: force (boolean) para forzar actualización ignorando TTL.
+// Salida: Arreglo con documentos normalizados para consulta rápida.
+// Procesos:
+// 1. Verificar si el caché en memoria sigue vigente y retornarlo si es válido.
+// 2. Consultar la base de datos, normalizar documentos y actualizar memoria y archivo local.
+// 3. Manejar advertencias en caso de error al escribir el archivo de caché.
+
 async function refreshDocumentCacheFromDb(force = false) { 
     if (!force && Date.now() - lastCacheSync < CACHE_TTL_MS && inMemoryDocCache.length) {
         return inMemoryDocCache;
@@ -65,6 +97,14 @@ async function refreshDocumentCacheFromDb(force = false) {
     return inMemoryDocCache;
 }
 
+// Descripción: Normaliza filas de documentos para el caché local eliminando ruido y campos nulos.
+// Entrada: row (object) con campos id, title, filename, source_url y content.
+// Salida: Objeto simplificado con contenido limpio y en minúsculas listo para búsquedas.
+// Procesos:
+// 1. Sanear el contenido textual y descartar filas vacías.
+// 2. Construir un objeto con título, archivo, fuente y versiones en minúsculas.
+// 3. Devolver el objeto preparado o null si no hay contenido utilizable.
+
 function normalizeDocForCache(row = {}) {
   const content = sanitizeText(row.content || "");
   if (!content) return null;
@@ -79,6 +119,13 @@ function normalizeDocForCache(row = {}) {
   };
 }
 
+// Descripción: Carga el caché de documentos desde memoria o desde el archivo local si está vacío.
+// Entrada: Sin parámetros; opera sobre rutas y estados globales.
+// Salida: Arreglo de documentos preparados para búsquedas rápidas.
+// Procesos:
+// 1. Retornar el caché en memoria si ya existe.
+// 2. Leer el archivo JSON de caché, parsearlo y sanear su contenido.
+// 3. Manejar errores de lectura registrando advertencias y devolver arreglo vacío si falla.
 
 async function loadDocumentsFromCache() { 
     if (inMemoryDocCache.length) return inMemoryDocCache;
@@ -96,6 +143,14 @@ async function loadDocumentsFromCache() {
     }
     return inMemoryDocCache;
 }
+
+// Descripción: Construye un extracto contextual alrededor de tokens coincidentes en el contenido.
+// Entrada: content (string) completo del documento, queryTokens (array) de términos de búsqueda.
+// Salida: Substring acotada que rodea la primera coincidencia relevante o el inicio del texto.
+// Procesos:
+// 1. Normalizar el contenido eliminando espacios redundantes y calcular su versión en minúsculas.
+// 2. Ubicar el índice más cercano donde aparecen tokens de la consulta.
+// 3. Retornar un fragmento de hasta 400 caracteres alrededor de la coincidencia o el inicio.
 
 function buildExcerptFromContent(content = "", queryTokens = []) {
   const normalized = content.replace(/\s+/g, " ").trim();
@@ -122,6 +177,14 @@ function buildExcerptFromContent(content = "", queryTokens = []) {
   return normalized.slice(start, end);
 }
 
+// Descripción: Formatea bloques de contexto en texto legible para inyectar en el prompt.
+// Entrada: blocks (array) de objetos con título, extracto y referencias.
+// Salida: Cadena unificada con bloques enumerados o mensaje por defecto.
+// Procesos:
+// 1. Validar que existan bloques; devolver mensaje de falta de contexto si no hay.
+// 2. Iterar cada bloque, agregando títulos, extractos y referencias identificadas.
+// 3. Unir todos los bloques con separaciones dobles de línea.
+
 function formatContextForPrompt(blocks = []) {
   if (!Array.isArray(blocks) || !blocks.length) return "No hay documentos relevantes.";
 
@@ -133,6 +196,14 @@ function formatContextForPrompt(blocks = []) {
     .join("\n\n");
 }
 
+// Descripción: Construye bloques de contexto a partir de documentos con extractos formateados.
+// Entrada: docs (array) con documentos que incluyen excerpt y title.
+// Salida: Arreglo de bloques listos para el prompt con referencias detectadas.
+// Procesos:
+// 1. Iterar documentos creando un extracto seguro con formatExcerpt.
+// 2. Detectar referencias normativas en cada extracto.
+// 3. Devolver la colección de bloques con título, extracto y referencias.
+
 function buildContextBlocks(docs = []) {
   return (docs || []).map((d) => {
     const excerpt = formatExcerpt(d.excerpt) || "";
@@ -143,6 +214,14 @@ function buildContextBlocks(docs = []) {
     };
   });
 }
+
+// Descripción: Recupera documentos relevantes desde el caché local usando coincidencias simples.
+// Entrada: query (string) con la búsqueda del usuario.
+// Salida: Lista de hasta 3 documentos ordenados por puntaje de similitud.
+// Procesos:
+// 1. Cargar documentos del caché y tokenizar la consulta en minúsculas.
+// 2. Calcular puntajes por coincidencia en título y contenido, generando extractos.
+// 3. Ordenar por puntaje descendente y devolver los mejores resultados.
 
 async function retrieveFromCache(query = "") {
   const docs = await loadDocumentsFromCache();
@@ -226,10 +305,26 @@ const safetySettings = [
     { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
+// Descripción: Identifica errores de Gemini relacionados con modelos inexistentes o no disponibles.
+// Entrada: err (Error) arrojado por el SDK de Gemini.
+// Salida: Booleano que indica si el error corresponde a modelo no encontrado.
+// Procesos:
+// 1. Normalizar el mensaje de error a minúsculas para facilitar la búsqueda.
+// 2. Revisar estado HTTP y contenido del mensaje en busca de patrones de modelo faltante.
+// 3. Retornar true cuando el error coincide con ausencia o indisponibilidad del modelo.
+
 function isModelNotFoundError(err) {
   const msg = String(err?.message || "").toLowerCase();
   return err?.status === 404 || msg.includes("not found") || msg.includes("no model") || msg.includes("unavailable");
 }
+
+// Descripción: Evalúa si un error de Gemini amerita reintento basado en código y mensaje.
+// Entrada: err (Error) devuelto por el cliente de Gemini.
+// Salida: Booleano indicando si se puede reintentar con otro modelo.
+// Procesos:
+// 1. Revisar la bandera retryable o si el error corresponde a modelo no encontrado.
+// 2. Analizar códigos HTTP comunes de reintento y mensajes de tiempo de espera.
+// 3. Retornar true si las condiciones sugieren que un nuevo intento puede funcionar.
 
 function isRetryableGeminiError(err) {
   if (!err) return false;
@@ -249,6 +344,14 @@ function isRetryableGeminiError(err) {
   );
 }
 
+// Descripción: Asegura la construcción de bloques de contexto incluso cuando no se envían desde el cliente.
+// Entrada: query (string) del usuario y providedBlocks (array) opcionales.
+// Salida: Arreglo de bloques de contexto listos para el prompt.
+// Procesos:
+// 1. Retornar los bloques provistos si existen y son válidos.
+// 2. Intentar regenerar contexto desde la base de datos usando retrieveContext si faltan.
+// 3. Devolver bloques vacíos si la reconstrucción falla o no hay resultados.
+
 async function ensureContextBlocks(query = "", providedBlocks = []) {
   if (Array.isArray(providedBlocks) && providedBlocks.length) return providedBlocks;
 
@@ -265,7 +368,15 @@ async function ensureContextBlocks(query = "", providedBlocks = []) {
   return Array.isArray(providedBlocks) ? providedBlocks : [];
 }
 
-// 3.3) Llamada protegida a Gemini con timeout
+// 3.3) Llamada protegida a GEMINI con timeout
+// Descripción: Envía una consulta al modelo Gemini con historial y contexto, manejando timeout manual.
+// Entrada: modelName (string) objetivo y objeto con query, contextBlocks e history.
+// Salida: Objeto con texto de respuesta y nombre del modelo usado o error con metadatos.
+// Procesos:
+// 1. Validar disponibilidad de genAI y configurar timeout de 15s con AbortController.
+// 2. Preparar historial, contexto y mensajes de sistema para estructurar el prompt.
+// 3. Ejecutar sendMessage, capturar errores para etiquetar reintentos y limpiar timeout.
+
 async function tryChatWithModel(modelName, { query, contextBlocks, history } = {}) {
   if (!genAI) {
     return { text: "⚠️ Servicio IA deshabilitado. Falta GEMINI_API_KEY.", modelName: "offline" };
@@ -333,6 +444,14 @@ ${responseFormat}
   }
 }
 
+// Descripción: Orquesta la selección de modelos Gemini probando fallbacks hasta obtener respuesta.
+// Entrada: options (object) con query, history y bloques de contexto opcionales.
+// Salida: Respuesta de chat con texto y modelo utilizado, o mensaje cuando IA no está disponible.
+// Procesos:
+// 1. Retornar mensaje offline si no hay clave configurada.
+// 2. Asegurar bloques de contexto y recorrer la lista de modelos ejecutando tryChatWithModel.
+// 3. Registrar intentos y devolver mensaje claro si ningún modelo responde correctamente.
+
 async function runChat(options = {}) {
   // Modo sin IA (no te mato el backend nunca)
   if (!genAI) {
@@ -375,8 +494,15 @@ async function runChat(options = {}) {
 
 
 // --- FIN: LÓGICA DE GEMINI REFORZADA ---
-
 // Endpoint /chatbot
+// Descripción: Atiende consultas del chatbot combinando contexto normativo y respuesta de Gemini.
+// Entrada: req (Request) con query y history opcional; res (Response) para enviar la respuesta.
+// Salida: JSON con la respuesta generada, fuentes utilizadas y el modelo empleado.
+// Procesos:
+// 1. Validar la consulta, recuperar contexto relevante y construir fuentes con enlaces.
+// 2. Invocar runChat para obtener la respuesta de IA y registrar la solicitud en BD y logs.
+// 3. Manejar escenarios sin contexto devolviendo un fallback controlado.
+
 router.post("/chatbot", async (req, res) => {
   const { query, history = [] } = req.body;
   if (!query?.trim()) return res.status(400).json({ error: "Empty query" });
@@ -466,6 +592,14 @@ router.post("/chatbot", async (req, res) => {
 });
 
 // Endpoint para registrar evaluaciones manuales desde el frontend
+// Descripción: Persiste evaluaciones manuales del chatbot en la tabla evaluation_logs.
+// Entrada: req (Request) con campos de evaluación; res (Response) para confirmar almacenamiento.
+// Salida: Respuesta HTTP 201 con la fila creada o error 500 en fallos.
+// Procesos:
+// 1. Leer campos enviados desde el frontend o usuario autenticado.
+// 2. Insertar el registro en evaluation_logs con la fecha actual.
+// 3. Devolver el registro creado o mensaje de error controlado.
+
 router.post("/log", async (req, res) => {
   const {
     case_id,
@@ -504,6 +638,14 @@ router.post("/log", async (req, res) => {
   }
 });
 
+// Descripción: Lista registros de evaluation_logs ordenados por fecha descendente.
+// Entrada: req (Request) sin parámetros específicos; res (Response) para devolver los registros.
+// Salida: JSON con logs existentes o error 500 en fallos de consulta.
+// Procesos:
+// 1. Consultar evaluation_logs ordenando por fecha más reciente.
+// 2. Retornar los resultados en formato JSON al cliente.
+// 3. Capturar y reportar errores de base de datos con mensaje controlado.
+
 router.get("/evaluation-logs", async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM evaluation_logs ORDER BY fecha DESC");
@@ -513,6 +655,14 @@ router.get("/evaluation-logs", async (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Descripción: Recupera documentos relevantes mediante búsquedas full-text, trigram o caché.
+// Entrada: query (string) de la pregunta del usuario.
+// Salida: Objeto con documentos encontrados y modo de búsqueda utilizado.
+// Procesos:
+// 1. Tokenizar la consulta y refrescar el caché de documentos.
+// 2. Intentar búsqueda full-text, luego trigram y finalmente documentos recientes.
+// 3. Si la base falla, recurrir al caché local y devolver resultados o indicar falta de datos.
 
 async function retrieveContext(query) {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);

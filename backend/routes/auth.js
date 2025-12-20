@@ -3,6 +3,14 @@ const pool = require("../db");
 
 const router = express.Router();
 
+// Descripción: Autentica usuarios verificando email y contraseña contra la base de datos.
+// Entrada: req (Request) con campos email y password; res (Response) para enviar el resultado.
+// Salida: Respuesta HTTP con objeto de usuario en éxito o mensaje de error en fallos.
+// Procesos:
+// 1. Validar presencia de email y password en el cuerpo de la petición.
+// 2. Consultar la base de datos usando crypt para confirmar las credenciales.
+// 3. Responder con los datos del usuario si es válido o con códigos 400/401 en caso contrario.
+
 router.post("/login", async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {

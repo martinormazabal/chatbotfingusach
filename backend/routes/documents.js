@@ -28,6 +28,14 @@ const upload = multer({
   }
 });
 
+// Descripción: Mejora la legibilidad de textos extraídos eliminando saltos y artefactos comunes de OCR.
+// Entrada: text (string) con contenido crudo de PDF u OCR.
+// Salida: string limpio y compacto sin saltos innecesarios ni guiones cortados.
+// Procesos:
+// 1. Remover retornos de carro y guiones de corte de línea.
+// 2. Reemplazar saltos de línea por espacios preservando oraciones.
+// 3. Normalizar espacios múltiples y recortar extremos para entregar texto continuo.
+
 function improveTextLegibility(text = "") {
   if (!text) return "";
 
@@ -39,6 +47,14 @@ function improveTextLegibility(text = "") {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
+
+// Descripción: Ejecuta un flujo de OCR mejorado convirtiendo la primera página a imagen y reconociendo texto.
+// Entrada: filePath (string) con ruta al PDF, originalFilename (string) nombre original del archivo.
+// Salida: Texto reconocido (string) o error descriptivo si el OCR falla.
+// Procesos:
+// 1. Convertir la primera página del PDF a imagen PNG temporal con alta resolución.
+// 2. Inicializar Tesseract con idiomas español e inglés y ejecutar reconocimiento.
+// 3. Devolver el texto obtenido y limpiar recursos temporales (worker e imagen).
 
 async function enhancedOCRProcessing(filePath, originalFilename) {
   let worker;
@@ -96,6 +112,14 @@ async function enhancedOCRProcessing(filePath, originalFilename) {
 
 let normativeTableReady = false;
 
+// Descripción: Garantiza que la tabla normative_texts exista antes de guardar contenidos normativos.
+// Entrada: Sin parámetros; usa el estado global normativeTableReady y la conexión pool.
+// Salida: Promesa resuelta cuando la tabla está confirmada o reintenta en caso de error.
+// Procesos:
+// 1. Verificar si la tabla ya se creó para evitar ejecuciones repetidas.
+// 2. Intentar crear la tabla con la definición esperada si no existe.
+// 3. Marcar el estado interno como listo o registrar advertencias al fallar.
+
 async function ensureNormativeTable() {
   if (normativeTableReady) return;
   try {
@@ -113,6 +137,14 @@ async function ensureNormativeTable() {
     console.warn("⚠️  No se pudo garantizar la tabla normative_texts:", err.message);
   }
 }
+
+// Descripción: Inserta o actualiza el texto normativo asociado a un documento en la tabla dedicada.
+// Entrada: documentId (number) identificador del documento, content (string) texto limpio a guardar.
+// Salida: Resultado de la consulta SQL con la fila afectada o null si falta información.
+// Procesos:
+// 1. Validar que existan documentId y content antes de operar.
+// 2. Asegurar la existencia de la tabla normativa mediante ensureNormativeTable.
+// 3. Ejecutar un UPSERT para insertar o actualizar el contenido, manejando esquemas faltantes.
 
 async function upsertNormativeContent(documentId, content) {
   if (!documentId || !content) return null;
@@ -164,7 +196,15 @@ const uploadMiddleware = (req, res, next) => {
   });
 };
 
-// Upload route is safe and does not perform OCR automatically.
+// Nota: La ruta de carga es segura y no realiza OCR automáticamente.
+// Descripción: Carga documentos PDF, intenta extraer texto (embebido u OCR) y guarda metadatos en BD.
+// Entrada: req (Request) con archivo en campo document y metadatos opcionales; res (Response) para resultado.
+// Salida: Respuesta HTTP 201 con datos del documento almacenado u error 400/500 si falla.
+// Procesos:
+// 1. Validar presencia de archivo y extraer texto incrustado; si no existe, ejecutar OCR.
+// 2. Limpiar el texto, calcular banderas de estado y guardar registro en la tabla documents.
+// 3. Insertar contenido en normative_texts si aplica y devolver el documento con estado de OCR.
+
 router.post('/upload', uploadMiddleware, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Archivo no recibido' });
@@ -303,7 +343,15 @@ router.post('/upload', uploadMiddleware, async (req, res) => {
   }
 });
 
-// New route to run OCR on-demand.
+// Nota: Nueva ruta para ejecutar OCR bajo demanda.
+// Descripción: Ejecuta OCR manual sobre un documento existente y actualiza su contenido en la base de datos.
+// Entrada: req (Request) con parámetro id del documento; res (Response) para enviar el resultado.
+// Salida: Respuesta HTTP 200 con el contenido actualizado o errores 404/500 según el caso.
+// Procesos:
+// 1. Recuperar el documento y localizar el archivo físico usando filename u original_filename.
+// 2. Ejecutar enhancedOCRProcessing para obtener y limpiar el texto reconocido.
+// 3. Actualizar la fila en documents, sincronizar normative_texts y retornar el contenido nuevo.
+
 router.post('/:id/run-ocr', async (req, res) => {
   const { id } = req.params;
   try {
@@ -425,6 +473,14 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Descripción: Elimina un documento y su archivo físico asociado del servidor.
+// Entrada: req (Request) con parámetro id del documento a borrar; res (Response) para la confirmación.
+// Salida: Respuesta HTTP 200 en éxito o 404/500 cuando el documento no existe o falla la eliminación.
+// Procesos:
+// 1. Buscar el documento por id y recuperar su filename registrado.
+// 2. Borrar la fila en la base de datos y eliminar el archivo del disco si está presente.
+// 3. Responder con mensaje de éxito o error contextualizado según la excepción.
+
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -447,6 +503,14 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar documento', details: error.message });
   }
 });
+
+// Descripción: Devuelve el contenido textual de un documento almacenado en la base de datos.
+// Entrada: req (Request) con parámetro id del documento; res (Response) para enviar el texto.
+// Salida: Respuesta HTTP 200 con el contenido o 404/500 si el documento no se encuentra o ocurre un error.
+// Procesos:
+// 1. Consultar la tabla documents para obtener el campo content según el id recibido.
+// 2. Validar la existencia del documento y retornar mensaje 404 si no hay coincidencias.
+// 3. Responder con el contenido encontrado o un mensaje de error controlado en caso de fallo.
 
 router.get('/:id/content', async (req, res) => {
     const { id } = req.params;

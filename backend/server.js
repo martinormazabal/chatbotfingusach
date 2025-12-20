@@ -18,7 +18,13 @@ const removeMd = require('remove-markdown');
 const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
 
 
-//Tu función sanitize se aplica a los textos que llegan o salen de tu API, no al propio código
+// Descripción: Limpia texto externo eliminando marcadores y formato Markdown para evitar ruido en respuestas.
+// Entrada: text (string) recibido por la API que puede contener markdown o referencias de contenido.
+// Salida: string saneado sin marcadores ni formato, listo para almacenarse o mostrarse.
+// Procesos:
+// 1. Validar que el parámetro sea una cadena y rechazar otros tipos.
+// 2. Remover coincidencias definidas por CITATION_REGEX del texto original.
+// 3. Eliminar cualquier sintaxis Markdown y devolver el resultado recortado.
 function sanitize(text) {
   if (typeof text !== 'string') {
     throw new Error('Invalid input type for sanitize function. Expected a string.');
@@ -96,6 +102,14 @@ if (pgCtlAvailable) {
 
 const INIT_RETRY_DELAY_MS = 5000;
 
+// Descripción: Inicializa dependencias críticas (BD y servidor Express) con reintentos en caso de fallo.
+// Entrada: No recibe parámetros; usa variables de entorno y conexiones globales.
+// Salida: Promesa resuelta cuando el servidor está listo o reintenta en caso de error.
+// Procesos:
+// 1. Verificar la conexión a PostgreSQL y asegurarse de que la extensión pg_trgm esté disponible.
+// 2. Configurar la aplicación Express (rutas, middlewares y chequeo de salud).
+// 3. Levantar el servidor en el puerto configurado o reintentar si ocurre un error.
+
 const initialize = async () => {
   try {
     // 1. Verificar conexión PostgreSQL
@@ -108,6 +122,14 @@ const initialize = async () => {
 
     // 3. Iniciar servidor Express
     const app = express();
+
+    // Descripción: Entrega un estado resumido del backend para monitoreo y debugging rápido.
+    // Entrada: req (Request) con datos de la petición HTTP, res (Response) para enviar el estado.
+    // Salida: JSON con indicadores de disponibilidad de la app, la base de datos y la API de Gemini.
+    // Procesos:
+    // 1. Construir un estado base con indicadores de servicio y presencia de GEMINI_API_KEY.
+    // 2. Probar la conexión a la base de datos y agregar el resultado al estado.
+    // 3. Responder con el objeto de estado en formato JSON al cliente.
 
     app.get('/api/healthz', async (req, res) => {
       const status = {
@@ -133,6 +155,14 @@ const initialize = async () => {
         .filter(Boolean)
     );
     allowedOrigins.add("http://localhost:3000");
+
+    // Descripción: Valida orígenes permitidos para CORS según listas configuradas y dominios seguros.
+    // Entrada: origin (string) del encabezado de la petición y callback (Function) para responder la verificación.
+    // Salida: Llamada al callback con permiso o error para el middleware CORS.
+    // Procesos:
+    // 1. Permitir solicitudes sin origen (como Postman) o presentes en la lista blanca configurada.
+    // 2. Intentar parsear el origen y aceptar dominios seguros predefinidos si coinciden.
+    // 3. Rechazar la solicitud con error cuando el origen no está autorizado o es inválido.
 
     const corsOptions = {
       origin(origin, callback) {
@@ -169,8 +199,15 @@ const initialize = async () => {
     app.use("/api/requests", require('./routes/requests'));
     app.use("/api/auth", require("./routes/auth"));
 
-       // Manejo de errores
-       app.use((err, req, res, next) => {
+    // Manejo de errores
+    // Descripción: Captura errores no manejados en rutas y devuelve respuesta genérica para el cliente.
+    // Entrada: err (Error) lanzado en middlewares previos, req y res objetos de Express, next para delegar.
+    // Salida: Respuesta HTTP 500 con mensaje estándar y registro del stack en consola.
+    // Procesos:
+    // 1. Registrar el error completo en el log del servidor para análisis.
+    // 2. Enviar un JSON con un mensaje de error genérico al cliente.
+    // 3. Evitar fuga de detalles internos retornando solo información controlada.
+    app.use((err, req, res, next) => {
       console.error('🔥 Error Global:', err.stack);
       res.status(500).json({ error: 'Error interno del servidor' });
     });

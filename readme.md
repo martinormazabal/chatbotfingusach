@@ -40,6 +40,12 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
     PASSWORD_RESET_TOKEN_TTL_MINUTES=60
     ```
 
+### Cómo obtener `GEMINI_API_KEY`
+
+1. Ingresa a [Google AI Studio](https://aistudio.google.com/) con tu cuenta de Google y abre la sección **API keys**.
+2. Crea una nueva API Key y copia el valor generado; no la compartas públicamente.
+3. Pega la clave en la variable `GEMINI_API_KEY` de tu archivo `.env` del backend (o en tu configuración de Firebase/IDX) y reinicia el servicio para que tome efecto.
+
 3. Inicializar base de datos:
 
     ```bash
