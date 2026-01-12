@@ -71,6 +71,8 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
     npm run dev
     ```
 
+Si aparece `concurrently: command not found`, asegúrate de ejecutar primero `npm install` dentro de `Frontend/` (instala dependencias locales) o reintenta tras reinstalar dependencias.
+
 El servidor queda disponible en: 
 👉 http://localhost:5000/api
 
