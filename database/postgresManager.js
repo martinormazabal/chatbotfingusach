@@ -2,13 +2,22 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 
-const dataDir = path.resolve(__dirname, "local");
-const logFile = path.resolve(__dirname, "local/logfile");
+const dataDir = path.resolve(__dirname, ".pgdata");
+const logFile = path.resolve(__dirname, ".pgdata/server.log");
 const socketDir = "/tmp/postgres";
 const initLockFile = path.resolve(__dirname, ".postgres-init.lock");
 const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 
 const isLocalHost = (host) => ["localhost", "127.0.0.1"].includes(host);
+
+const isLockStale = () => {
+  if (!fs.existsSync(initLockFile)) {
+    return false;
+  }
+
+  const { mtimeMs } = fs.statSync(initLockFile);
+  return Date.now() - mtimeMs > LOCK_TIMEOUT_MS;
+};
 
 const ensureDataDirInitialized = () => {
   if (!fs.existsSync(dataDir)) {

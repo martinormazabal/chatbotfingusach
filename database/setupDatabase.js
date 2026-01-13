@@ -108,6 +108,7 @@ const setup = async () => {
     if (!dbReady) {
       process.exit(1);
     }
+
     const initSQL = fs.readFileSync(initFilePath, 'utf8');
     await pool.query(initSQL);
     console.log("✅ Repositorio instalado exitosamente");
