@@ -50,7 +50,8 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
 
     ```bash
     cd database
-    psql -U postgres -f init.sql
+    psql -U postgres -f bootstrap.sql
+    psql -U chatbotuser -d chatbotdb -f init.sql
     ```
 
 4. Instalar dependencias:

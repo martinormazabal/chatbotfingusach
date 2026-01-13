@@ -7,28 +7,9 @@ DROP TABLE IF EXISTS documents CASCADE;
 */
 -- Resto de tablas...
 BEGIN;
--- (Opcional) Crear usuario
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS unaccent;
-CREATE USER chatbotuser WITH PASSWORD 'cp1619comm2k1';
-CREATE DATABASE chatbotdb WITH OWNER = chatbotuser;
-CREATE DATABASE postgres WITH OWNER = chatbotuser;
-CREATE INDEX IF NOT EXISTS idx_docs_ft_es
-GRANT ALL PRIVILEGES ON DATABASE chatbotdb TO chatbotuser;
-GRANT ALL PRIVILEGES ON DATABASE postgres TO chatbotuser;
-ALTER USER chatbotuser CREATEDB;
-ALTER USER chatbotuser CREATEROLE;
-
-ON documents
-USING GIN (to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))));
-
--- índice trigramas para like/similarity
-CREATE INDEX IF NOT EXISTS idx_docs_trgm_title ON documents USING GIN (title gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_docs_trgm_content ON documents USING GIN (content gin_trgm_ops);
-
--- columna para URL de fuente oficial (si falta)
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_url TEXT;
 
 /*
 \c postgres chatbotuser
@@ -157,7 +138,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO chatbotuser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO chatbotuser;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-@@ -160,26 +165,25 @@ GRANT USAGE, SELECT ON SEQUENCE evaluation_logs_id_seq TO chatbotuser;
+GRANT USAGE, SELECT ON SEQUENCES TO chatbotuser;
 ALTER TABLE documents
   ADD COLUMN IF NOT EXISTS source_url TEXT;
 

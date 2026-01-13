@@ -4,7 +4,9 @@ const { execSync } = require("child_process");
 
 const dataDir = path.resolve(__dirname, "local");
 const logFile = path.resolve(__dirname, "local/logfile");
-const socketDir = "/tmp/pgsocket";
+const socketDir = "/tmp/postgres";
+const initLockFile = path.resolve(__dirname, ".postgres-init.lock");
+const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 
 const isLocalHost = (host) => ["localhost", "127.0.0.1"].includes(host);
 
@@ -19,6 +21,22 @@ const ensureDataDirInitialized = () => {
     return true;
   }
 
+  if (fs.existsSync(initLockFile) && !isLockStale()) {
+    console.log("⏳ Inicialización de PostgreSQL en curso desde otro proceso. Esperando...");
+    return false;
+  }
+
+  if (fs.existsSync(initLockFile) && isLockStale()) {
+    console.warn("⚠️  Se detectó un lock de inicialización antiguo. Limpiando...");
+    fs.unlinkSync(initLockFile);
+  }
+
+  const hasExistingFiles = fs.readdirSync(dataDir).length > 0;
+  if (hasExistingFiles) {
+    console.warn("⚠️  El directorio de datos no está vacío y falta PG_VERSION. Se omitirá initdb.");
+    return false;
+  }
+
   try {
     execSync("initdb --version", { stdio: "ignore" });
   } catch (err) {
@@ -26,10 +44,30 @@ const ensureDataDirInitialized = () => {
     return false;
   }
 
-  console.log("🧱 Inicializando clúster de PostgreSQL...");
-  execSync(`initdb -D ${dataDir}`, { stdio: "inherit" });
-  console.log("✅ Directorio de datos inicializado");
-  return true;
+  let lockHandle;
+  try {
+    lockHandle = fs.openSync(initLockFile, "wx");
+  } catch (lockError) {
+    if (lockError.code === "EEXIST") {
+      console.log("⏳ Otro proceso está inicializando PostgreSQL. Se omitirá initdb.");
+      return false;
+    }
+    throw lockError;
+  }
+
+  try {
+    console.log("🧱 Inicializando clúster de PostgreSQL...");
+    execSync(`initdb -D ${dataDir}`, { stdio: "inherit" });
+    console.log("✅ Directorio de datos inicializado");
+    return true;
+  } finally {
+    if (lockHandle) {
+      fs.closeSync(lockHandle);
+    }
+    if (fs.existsSync(initLockFile)) {
+      fs.unlinkSync(initLockFile);
+    }
+  }
 };
 
 const ensurePostgresRunning = ({
