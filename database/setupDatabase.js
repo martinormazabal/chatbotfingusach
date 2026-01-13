@@ -3,6 +3,9 @@ require("dotenv").config();
 const fs = require("fs");
 const { Pool } = require("pg");
 const path = require('path');
+const { ensurePostgresRunning } = require("./postgresManager");
+
+ensurePostgresRunning();
 // Verificar y depurar la configuración del Pool
 console.log('Pool config:', {
   user: process.env.DB_USER,

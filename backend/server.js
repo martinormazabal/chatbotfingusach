@@ -7,14 +7,13 @@ process.on('uncaughtException', (err) => {
 
 const express = require("express");
 const cors = require("cors");
-const fs = require("fs"); // Importar el módulo fs
 const path = require("path");
 
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const pool = require("./db");
-const { execSync } = require("child_process");
 const removeMd = require('remove-markdown');
+const { ensurePostgresRunning } = require("../database/postgresManager");
 const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
 
 
@@ -35,70 +34,7 @@ function sanitize(text) {
   clean = removeMd(clean);
   return clean.trim();
 }
-// Definir rutas absolutas
-const dataDir = path.resolve(__dirname, '../database/local');
-const logFile = path.resolve(__dirname, '../database/local/logfile');
-const socketDir = '/tmp/pgsocket';
-
-let pgCtlAvailable = false;
-
-//Configuración inicial
-try {
-  execSync('pg_ctl --version', { stdio: 'ignore' });
-  pgCtlAvailable = true;
-} catch (err) {
-  console.warn('⚠️  pg_ctl no está disponible en el PATH. Se omitirá la autogestión de PostgreSQL.');
-}
-
-let isRunning = null;
-
-if (pgCtlAvailable) {
-  let isRunning;
-
-  try {
-    if (!fs.existsSync(dataDir)) {
-      console.log(`📁 Directorio de datos no encontrado. Creando: ${dataDir}`);
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    execSync(`pg_ctl status -D ${dataDir}`, { stdio: 'ignore' });
-    isRunning = true;
-  } catch (err) {
-    if (err?.status === 3) {
-      isRunning = false;
-    } else {
-      console.error('⚠️  No se pudo verificar el estado de PostgreSQL con pg_ctl:', err.message || err);
-      isRunning = null;
-    }
-  }
-
-  if (isRunning === false) {
-    try {
-      console.log('🔄 PostgreSQL no está en ejecución. Iniciando...');
-      execSync(`mkdir -p ${socketDir}`, { stdio: 'inherit' });
-      execSync(`chmod 777 ${socketDir}`, { stdio: 'inherit' });
-      execSync(
-        `pg_ctl \
-          -D ${dataDir} \
-          -l ${logFile} \
-          start -w \
-          -o "-c listen_addresses='localhost' \
-              -c port=5432 \
-              -c unix_socket_directories='${socketDir}'"`,
-        { stdio: 'inherit' }
-      );
-      console.log('✅ PostgreSQL iniciado');
-      isRunning = true;
-    } catch (startErr) {
-      console.error('❌ No se pudo iniciar PostgreSQL con pg_ctl:', startErr.message || startErr);
-    }
-  } else if (isRunning) {
-    console.log('✔️ PostgreSQL ya está en ejecución');
-  } else {
-    console.log('ℹ️  Continuando sin gestión automática de PostgreSQL. Asegúrate de que el servicio esté disponible.');
-  }
-} else {
-  console.log('ℹ️  Continuando sin gestión automática de PostgreSQL. Se asumirá que la base de datos está gestionada externamente.');
-}
+ensurePostgresRunning();
 
 const INIT_RETRY_DELAY_MS = 5000;
 
