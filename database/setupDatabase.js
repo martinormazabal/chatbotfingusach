@@ -2,6 +2,7 @@
 require("dotenv").config();
 const fs = require("fs");
 const { Pool } = require("pg");
+const format = require("pg-format");
 const path = require('path');
 const { ensurePostgresRunning } = require("./postgresManager");
 
@@ -19,43 +20,42 @@ const dbPassword = process.env.DB_PASSWORD || 'cp1619comm2k1';
 const dbHost = process.env.DB_HOST || 'localhost';
 const dbPort = process.env.DB_PORT || 5432;
 const dbName = process.env.DB_NAME || 'chatbotdb';
-const adminUser = process.env.DB_ADMIN_USER || 'postgres';
 const adminPassword = process.env.DB_ADMIN_PASSWORD || '';
 const adminDatabase = process.env.DB_ADMIN_DB || 'postgres';
+const adminUserCandidates = [
+  process.env.DB_ADMIN_USER,
+  process.env.PGUSER,
+  'postgres',
+  process.env.USER,
+  process.env.LOGNAME,
+].filter(Boolean);
 
 const isSafeIdentifier = (identifier) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier);
 
-if (![dbUser, dbName, adminUser, adminDatabase].every(isSafeIdentifier)) {
+if (![dbUser, dbName].every(isSafeIdentifier)) {
   throw new Error("Invalid database identifier. Use alphanumeric characters and underscores only.");
 }
 
-const pool = new Pool({
-  user: dbUser,
-  password: dbPassword,
-  host: dbHost,
-  port: dbPort,
-  database: dbName
-});
-
-const adminPool = new Pool({
-  user: adminUser,
-  password: adminPassword,
-  host: dbHost,
-  port: dbPort,
-  database: adminDatabase
-});
+let pool;
 
 const RETRY_DELAY_MS = 5000;
 const MAX_RETRIES = Number(process.env.DB_MAX_RETRIES || 10);
 
-const waitForDatabase = async (poolToCheck, retries = 0) => {
+const isRoleMissingError = (error) => /role ".+" does not exist/i.test(error.message);
+
+const waitForDatabase = async (poolToCheck, retries = 0, { stopOnRoleMissing = false } = {}) => {
   try {
     await poolToCheck.query("SELECT 1");
-    return true;
+    return { ready: true };
   } catch (error) {
+    if (stopOnRoleMissing && isRoleMissingError(error)) {
+      console.warn(`⚠️  ${error.message}`);
+      return { ready: false, reason: "role-missing" };
+    }
+
     if (retries >= MAX_RETRIES) {
       console.error(`❌ No se pudo conectar a PostgreSQL tras ${retries} intentos:`, error.message);
-      return false;
+      return { ready: false, reason: "unreachable" };
     }
 
     const nextAttempt = retries + 1;
@@ -65,25 +65,53 @@ const waitForDatabase = async (poolToCheck, retries = 0) => {
       }s...`
     );
     await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-    return waitForDatabase(poolToCheck, nextAttempt);
+    return waitForDatabase(poolToCheck, nextAttempt, { stopOnRoleMissing });
   }
+};
+
+const buildAdminPool = (adminUser) =>
+  new Pool({
+    user: adminUser,
+    password: adminPassword || undefined,
+    host: dbHost,
+    port: dbPort,
+    database: adminDatabase,
+  });
+
+const resolveAdminPool = async () => {
+  const uniqueCandidates = [...new Set(adminUserCandidates)];
+
+  for (const candidate of uniqueCandidates) {
+    const candidatePool = buildAdminPool(candidate);
+    const result = await waitForDatabase(candidatePool, 0, { stopOnRoleMissing: true });
+    if (result.ready) {
+      return { adminUser: candidate, adminPool: candidatePool };
+    }
+
+    await candidatePool.end().catch(() => undefined);
+  }
+
+  console.error(
+    "❌ No se pudo encontrar un usuario administrador válido. Configura DB_ADMIN_USER/DB_ADMIN_PASSWORD o revisa la instalación de PostgreSQL."
+  );
+  return null;
 };
 
 // Ejecutar init.sql
 const initFilePath = path.resolve(__dirname, 'init.sql');
 
-const ensureRoleAndDatabase = async () => {
+const ensureRoleAndDatabase = async (adminPool) => {
   const roleResult = await adminPool.query(
     "SELECT 1 FROM pg_roles WHERE rolname = $1",
     [dbUser]
   );
 
   if (roleResult.rowCount === 0) {
-    await adminPool.query(`CREATE ROLE "${dbUser}" WITH LOGIN PASSWORD $1`, [dbPassword]);
+    await adminPool.query(format("CREATE ROLE %I WITH LOGIN PASSWORD %L", dbUser, dbPassword));
   }
 
-  await adminPool.query(`ALTER ROLE "${dbUser}" CREATEDB`);
-  await adminPool.query(`ALTER ROLE "${dbUser}" CREATEROLE`);
+  await adminPool.query(format("ALTER ROLE %I CREATEDB", dbUser));
+  await adminPool.query(format("ALTER ROLE %I CREATEROLE", dbUser));
 
   const dbResult = await adminPool.query(
     "SELECT 1 FROM pg_database WHERE datname = $1",
@@ -91,21 +119,40 @@ const ensureRoleAndDatabase = async () => {
   );
 
   if (dbResult.rowCount === 0) {
-    await adminPool.query(`CREATE DATABASE "${dbName}" OWNER "${dbUser}"`);
+    await adminPool.query(format("CREATE DATABASE %I OWNER %I", dbName, dbUser));
   }
 };
 
 const setup = async () => {
+  let resolvedAdmin;
   try {
-    const adminReady = await waitForDatabase(adminPool);
-    if (!adminReady) {
+    resolvedAdmin = await resolveAdminPool();
+    if (!resolvedAdmin) {
       process.exit(1);
     }
 
-    await ensureRoleAndDatabase();
+    const { adminPool, adminUser } = resolvedAdmin;
+    console.log(`ℹ️  Usando usuario administrador: ${adminUser}`);
+
+    const adminReady = await waitForDatabase(adminPool);
+    if (!adminReady.ready) {
+      await adminPool.end();
+      process.exit(1);
+    }
+
+    await ensureRoleAndDatabase(adminPool);
+
+    pool = new Pool({
+      user: dbUser,
+      password: dbPassword,
+      host: dbHost,
+      port: dbPort,
+      database: dbName
+    });
 
     const dbReady = await waitForDatabase(pool);
-    if (!dbReady) {
+    if (!dbReady.ready) {
+      await adminPool.end();
       process.exit(1);
     }
 
@@ -121,8 +168,12 @@ const setup = async () => {
       process.exit(1);
     }
   } finally {
-    await adminPool.end();
-    await pool.end();
+    if (resolvedAdmin?.adminPool) {
+      await resolvedAdmin.adminPool.end();
+    }
+    if (pool) {
+      await pool.end();
+    }
   }
 };
 

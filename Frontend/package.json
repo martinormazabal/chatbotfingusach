@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node ../database/pgUp.js && npx --yes concurrently \"node ../backend/server.js\" \"next dev\" \"node ../database/setupDatabase.js\"",
+    "dev": "npx --yes concurrently \"node ../backend/server.js\" \"next dev\" \"node ../database/setupDatabase.js\"",
     "backend": "cd ../backend && npm run dev",
     "frontend": "cd ../frontend && next dev",
     "setup": "cd ../database && node setupDatabase.js",
