@@ -31,7 +31,41 @@ set_conf_port() {
   fi
 }
 
-# 1) initdb si falta
+# Detecta PGDATA roto (PG_VERSION existe, pero faltan dirs requeridos como pg_notify)
+pgdata_is_broken() {
+  [ -f "$PGDATA/PG_VERSION" ] || return 1
+  for d in base global pg_wal pg_xact pg_notify; do
+    [ -d "$PGDATA/$d" ] || return 0
+  done
+  return 1
+}
+
+reinit_pgdata() {
+  local ts
+  ts="$(date +%Y%m%d-%H%M%S)"
+  echo "[pg-up] PGDATA roto (faltan directorios como pg_notify). Re-inicializando..."
+  mv "$PGDATA" "${PGDATA}.broken-${ts}" 2>/dev/null || true
+  mkdir -p "$PGDATA"
+  chmod 700 "$PGDATA" 2>/dev/null || true
+
+  initdb -D "$PGDATA" --username=postgres --auth=trust >/dev/null
+
+  cat >> "$PGDATA/postgresql.conf" <<CONF
+listen_addresses = '127.0.0.1'
+unix_socket_directories = '${PGDATA}'
+max_connections = 20
+shared_buffers = 32MB
+work_mem = 4MB
+maintenance_work_mem = 32MB
+CONF
+}
+
+# 0) Si está roto, reinit (esto evita el FATAL pg_notify)
+if pgdata_is_broken; then
+  reinit_pgdata
+fi
+
+# 1) initdb si falta totalmente
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
   echo "[pg-up] initdb en $PGDATA"
   initdb -D "$PGDATA" --username=postgres --auth=trust >/dev/null
@@ -46,7 +80,7 @@ maintenance_work_mem = 32MB
 CONF
 fi
 
-# 2) si ya corre este clúster, fijar PORTFILE y salir
+# 2) Si ya corre este clúster, fijar PORTFILE y salir
 if pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then
   rp="$(running_port_from_pid)"
   if [ -n "$rp" ]; then
