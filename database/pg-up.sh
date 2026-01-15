@@ -9,112 +9,80 @@ source "$here/pg.env"
 : "${PGPORT_FALLBACK:=5433}"
 : "${PGDATA:=$here/.pgdata}"
 
+LOGFILE="$PGDATA/server.log"
+PORTFILE="$PGDATA/PORT"
+
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Falta '$1' en PATH."; exit 1; }; }
-for bin in psql initdb pg_ctl pg_isready postgres; do need "$bin"; done
+for bin in initdb pg_ctl pg_isready psql postgres; do need "$bin"; done
 
 mkdir -p "$PGDATA"
 chmod 700 "$PGDATA" 2>/dev/null || true
 
-LOGFILE="$PGDATA/server.log"
-PORTFILE="$PGDATA/PORT"
-
-running_port_from_pid() {
-  [ -f "$PGDATA/postmaster.pid" ] && sed -n '4p' "$PGDATA/postmaster.pid" | tr -d '\r' || true
-}
-
-set_conf_port() {
-  local p="$1"
-  if grep -qE '^[[:space:]]*port[[:space:]]*=' "$PGDATA/postgresql.conf"; then
-    sed -i -E "s/^[[:space:]]*port[[:space:]]*=.*/port = ${p}/" "$PGDATA/postgresql.conf"
-  else
-    echo "port = ${p}" >> "$PGDATA/postgresql.conf"
-  fi
-}
-
-# Detecta PGDATA roto (PG_VERSION existe, pero faltan dirs requeridos como pg_notify)
-pgdata_is_broken() {
-  [ -f "$PGDATA/PG_VERSION" ] || return 1
-  for d in base global pg_wal pg_xact pg_notify; do
-    [ -d "$PGDATA/$d" ] || return 0
+# Puerto libre: 5432 -> 5433 -> 5434-5450
+port_free() { (echo >/dev/tcp/${PGHOST}/$1) >/dev/null 2>&1 && return 1 || return 0; }
+pick_port() {
+  for p in "$PGPORT_PRIMARY" "$PGPORT_FALLBACK" $(seq 5434 5450); do
+    if port_free "$p"; then echo "$p"; return 0; fi
   done
+  echo "No hay puertos libres entre 5432-5450" >&2
   return 1
 }
 
-reinit_pgdata() {
-  local ts
-  ts="$(date +%Y%m%d-%H%M%S)"
-  echo "[pg-up] PGDATA roto (faltan directorios como pg_notify). Re-inicializando..."
-  mv "$PGDATA" "${PGDATA}.broken-${ts}" 2>/dev/null || true
-  mkdir -p "$PGDATA"
-  chmod 700 "$PGDATA" 2>/dev/null || true
-
-  initdb -D "$PGDATA" --username=postgres --auth=trust >/dev/null
-
-  cat >> "$PGDATA/postgresql.conf" <<CONF
-listen_addresses = '127.0.0.1'
-unix_socket_directories = '${PGDATA}'
-max_connections = 20
-shared_buffers = 32MB
-work_mem = 4MB
-maintenance_work_mem = 32MB
-CONF
+# Detecta clúster incompleto/corrupto (faltan dirs requeridos como pg_notify)
+cluster_ok() {
+  [ -f "$PGDATA/PG_VERSION" ] || return 1
+  for d in base global pg_wal pg_xact pg_multixact pg_notify; do
+    [ -d "$PGDATA/$d" ] || return 1
+  done
+  return 0
 }
 
-# 0) Si está roto, reinit (esto evita el FATAL pg_notify)
-if pgdata_is_broken; then
-  reinit_pgdata
+# Si existe PG_VERSION pero faltan carpetas => recrear
+if [ -e "$PGDATA/PG_VERSION" ] && ! cluster_ok; then
+  echo "[pg-up] PGDATA incompleto/corrupto -> recreando clúster en $PGDATA"
+  rm -rf "$PGDATA"
+  mkdir -p "$PGDATA"
+  chmod 700 "$PGDATA" 2>/dev/null || true
 fi
 
-# 1) initdb si falta totalmente
+# Primer arranque: initdb crea el clúster dentro de PGDATA :contentReference[oaicite:5]{index=5}
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
   echo "[pg-up] initdb en $PGDATA"
-  initdb -D "$PGDATA" --username=postgres --auth=trust >/dev/null
-
-  cat >> "$PGDATA/postgresql.conf" <<CONF
-listen_addresses = '127.0.0.1'
-unix_socket_directories = '${PGDATA}'
-max_connections = 20
-shared_buffers = 32MB
-work_mem = 4MB
-maintenance_work_mem = 32MB
-CONF
+  # -U postgres asegura que exista el rol postgres (superuser del clúster)
+  # locale C evita varios problemas de locales en entornos minimalistas
+  initdb -D "$PGDATA" -U postgres --auth=trust --encoding=UTF8 --locale=C
 fi
 
-# 2) Si ya corre este clúster, fijar PORTFILE y salir
+# Si ya está corriendo, reporta y guarda el puerto real
 if pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then
-  rp="$(running_port_from_pid)"
-  if [ -n "$rp" ]; then
+  rp="$(sed -n '4p' "$PGDATA/postmaster.pid" 2>/dev/null | tr -d '\r' || true)"
+  if [ -n "${rp:-}" ]; then
     echo "$rp" > "$PORTFILE"
     echo "[pg-up] OK (ya estaba arriba) $PGHOST:$rp"
     exit 0
   fi
 fi
 
-# Limpia pid obsoleto si quedó
+# Limpia PID obsoleto si quedó
 if [ -f "$PGDATA/postmaster.pid" ] && ! pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then
   rm -f "$PGDATA/postmaster.pid"
 fi
 
-try_start() {
-  local p="$1"
-  set_conf_port "$p"
-  echo "[pg-up] starting postgres en $PGHOST:$p ..."
-  if pg_ctl -D "$PGDATA" -l "$LOGFILE" -o "-p ${p} -h 127.0.0.1 -k ${PGDATA}" start -w >/dev/null; then
-    echo "$p" > "$PORTFILE"
-    echo "[pg-up] OK $PGHOST:$p"
-    return 0
-  fi
-  return 1
-}
+PGPORT="$(pick_port)"
+echo "$PGPORT" > "$PORTFILE"
 
-# 3) 5432 primero; si falla, 5433
-if ! try_start "$PGPORT_PRIMARY"; then
-  echo "[pg-up] No pudo iniciar en $PGPORT_PRIMARY, intentando $PGPORT_FALLBACK..."
-  if ! try_start "$PGPORT_FALLBACK"; then
-    echo "[pg-up] ERROR: no pudo iniciar ni en $PGPORT_PRIMARY ni en $PGPORT_FALLBACK"
-    echo "---- Últimas 200 líneas del log: $LOGFILE ----"
-    tail -n 200 "$LOGFILE" || true
-    echo "--------------------------------------------"
-    exit 1
-  fi
+echo "[pg-up] starting postgres en $PGHOST:$PGPORT ..."
+if ! pg_ctl -D "$PGDATA" -l "$LOGFILE" start -w -o "-h ${PGHOST} -p ${PGPORT}" >/dev/null; then
+  echo "[pg-up] ERROR: postgres no pudo iniciar. Log (últimas 200 líneas):"
+  tail -n 200 "$LOGFILE" || true
+  exit 1
 fi
+
+for i in {1..30}; do
+  pg_isready -h "$PGHOST" -p "$PGPORT" >/dev/null 2>&1 && { echo "[pg-up] OK $PGHOST:$PGPORT"; exit 0; }
+  sleep 0.2
+done
+
+echo "[pg-up] No respondió. Log (últimas 200 líneas):"
+tail -n 200 "$LOGFILE" || true
+exit 1

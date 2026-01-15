@@ -161,6 +161,11 @@ CREATE INDEX IF NOT EXISTS idx_documents_content_trgm
   ON documents
   USING GIN (content gin_trgm_ops);
 
+-- Antes (puede disparar IMMUTABLE)
+CREATE INDEX docs_fts_idx ON docs USING gin (to_tsvector(content));
+
+-- Después (config fija)
+CREATE INDEX docs_fts_idx ON docs USING gin (to_tsvector('spanish', content));
 
 COMMIT;
 --Verificar permisos (opcional)

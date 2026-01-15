@@ -66,6 +66,45 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
     npm install
     ```
 
+---
+
+## 🧰 PostgreSQL local en `database/.pgdata` (Firebase Studio)
+
+Si se borra `database/.pgdata`, se elimina el clúster completo (PGDATA) y debe recrearse con `initdb`.
+
+### Iniciar
+
+```bash
+cd database
+chmod u+x pg-up.sh psql.sh
+./pg-up.sh
+```
+
+### Reset total (borra DB local)
+
+```bash
+rm -rf database/.pgdata
+cd database && ./pg-up.sh
+```
+
+### Error típico: `/run/postgresql/.s.PGSQL.5432.lock` no existe
+
+En Firebase Studio puede no existir `/run/postgresql`. PostgreSQL intenta crear ahí el socket/lock file y falla.
+La solución es forzar el socket dentro de `.pgdata` (opción `-k`) o desactivar sockets Unix:
+
+- **Recomendado (socket en `.pgdata`)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -k $PGDATA"`
+- **Alternativa (solo TCP)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -c unix_socket_directories=''"`
+
+### Comando manual equivalente
+
+Dentro de `database/`:
+
+```bash
+rm -rf .pgdata
+initdb -D .pgdata -U postgres --auth=trust --encoding=UTF8 --locale=C
+pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
+```
+
 ## ▶️ Ejecución
 
 1. Levantar frontend:

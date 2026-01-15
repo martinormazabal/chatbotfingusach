@@ -1,1 +1,1 @@
-/usr/bin/postgres "-D" "/home/user/chatbotfingusach/database/.pgdata" "-c" "listen_addresses=localhost" "-c" "port=5432" "-c" "unix_socket_directories=/tmp/postgres"
+/usr/bin/postgres "-D" ".pgdata" "-h" "127.0.0.1" "-p" "5432" "-k" "/home/user/chatbotfingusach/database/.pgdata"

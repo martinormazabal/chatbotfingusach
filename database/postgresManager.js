@@ -1,43 +1,28 @@
+// database/postgresManager.js
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
 
-const dataDir = path.resolve(__dirname, ".pgdata");
-const portFile = path.resolve(dataDir, "PORT");
+function ensurePostgresRunning() {
+  const cwd = __dirname; // carpeta database
+  execFileSync("bash", ["./pg-up.sh"], {
+    cwd,
+    stdio: "inherit",
+    env: process.env,
+  });
 
-const isLocalHost = (host) => ["localhost", "127.0.0.1"].includes(host);
+  const portFile = path.join(cwd, ".pgdata", "PORT");
+  const port = fs.readFileSync(portFile, "utf8").trim();
 
-const readPortFile = () => {
-  if (!fs.existsSync(portFile)) {
-    return null;
-  }
+  // Sincroniza variables para el resto del proyecto
+  process.env.PGHOST = process.env.PGHOST || "127.0.0.1";
+  process.env.PGPORT = port;
 
-  const portValue = fs.readFileSync(portFile, "utf8").trim();
-  return portValue ? Number(portValue) : null;
-};
+  // si tu app usa DB_*:
+  process.env.DB_HOST = process.env.DB_HOST || process.env.PGHOST;
+  process.env.DB_PORT = process.env.DB_PORT || port;
 
-const ensurePostgresRunning = ({
-  host = process.env.DB_HOST || "localhost",
-} = {}) => {
-  if (!isLocalHost(host)) {
-    console.log("ℹ️  PostgreSQL externo detectado. Se omitirá la autogestión local.");
-    return;
-  }
+  return { host: process.env.PGHOST, port: Number(port) };
+}
 
-  try {
-    execSync("bash ./pg-up.sh", { cwd: __dirname, stdio: "inherit" });
-  } catch (err) {
-    console.error("❌ No se pudo iniciar PostgreSQL con pg-up.sh:", err.message || err);
-    return;
-  }
-
-  const detectedPort = readPortFile();
-  if (detectedPort) {
-    process.env.DB_HOST = "127.0.0.1";
-    process.env.DB_PORT = String(detectedPort);
-  }
-};
-
-module.exports = {
-  ensurePostgresRunning,
-};
+module.exports = { ensurePostgresRunning };
