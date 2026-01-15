@@ -46,25 +46,28 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
 2. Crea una nueva API Key y copia el valor generado; no la compartas públicamente.
 3. Pega la clave en la variable `GEMINI_API_KEY` de tu archivo `.env` del backend (o en tu configuración de Firebase/IDX) y reinicia el servicio para que tome efecto.
 
-3. Inicializar base de datos:
+3. Inicializar base de datos (modo local):
 
-    ```bash
-    cd database
-    chmod u+x pg-up.sh psql.sh
-    bash ./pg-up.sh
-    ./psql.sh -U postgres -d postgres -f 01_roles.sql
-    ./psql.sh -U postgres -d postgres -f 02_createdb.sql
-    ./psql.sh -U chatbotuser -d chatbotdb -f init.sql
-    ```
+```bash
+cd database
+chmod u+x pg-up.sh psql.sh
+initdb -D .pgdata -U postgres --auth=trust --encoding=UTF8 --locale=C
+pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
+bash ./pg-up.sh
+./psql.sh -U postgres -d postgres -f 01_roles.sql
+./psql.sh -U postgres -d postgres -f 02_createdb.sql
+./psql.sh -U chatbotuser -d chatbotdb -f init.sql
+node setupDatabase.js
+```
 
 4. Instalar dependencias:
 
-    ```bash
-    cd backend
-    npm install
-    cd ../frontend
-    npm install
-    ```
+```bash
+cd backend
+npm install
+cd ../frontend
+npm install
+```
 
 ---
 
@@ -107,12 +110,14 @@ pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(p
 
 ## ▶️ Ejecución
 
-1. Levantar frontend:
+1. Levantar frontend (secuencia recomendada):
 
-    ```bash
-    cd frontend
-    npm run dev
-    ```
+```bash
+cd frontend
+npm run dev
+```
+
+Esto ejecuta primero `database/setupDatabase.js` (arranque de Postgres + esquema) y luego corre backend + Next.js en paralelo con `concurrently -k`.
 
 Si aparece `concurrently: command not found`, asegúrate de ejecutar primero `npm install` dentro de `Frontend/` (instala dependencias locales) o reintenta tras reinstalar dependencias.
 
@@ -201,6 +206,41 @@ El siguiente plan permite ejecutar, documentar y presentar una demostración de 
     ├── frontend/       # Next.js (interfaz)
     ├── database/       # Scripts SQL e inicialización
     └── README.md
+
+---
+
+## 🗄️ Operación de base de datos local (Firebase Studio)
+
+### Iniciar / verificar
+
+```bash
+cd database
+chmod u+x pg-up.sh psql.sh
+./pg-up.sh
+cat .pgdata/PORT
+```
+
+### Reset total (borra DB local)
+
+```bash
+rm -rf database/.pgdata
+cd database && ./pg-up.sh
+node setupDatabase.js
+```
+
+### Troubleshooting
+
+- **Ver logs del servidor**: `tail -n 200 database/.pgdata/server.log`
+- **Socket en ruta inexistente**: el arranque fuerza `-k database/.pgdata` para evitar `/run/postgresql`.
+- **Error en índices/DDL**: vuelve a ejecutar `node database/setupDatabase.js` tras corregir `database/init.sql`.
+
+---
+
+## 🔐 Nota sobre el preview URL (401)
+
+Si al abrir el preview URL de Cloud Workstations aparece:
+`Permission 'workstations.workstations.use' denied`, la cuenta necesita el rol
+**roles/workstations.user** (o superior). Pide al profesor/admin que lo asigne en IAM.
 
 ## 👩‍🏫 Uso para revisión
 

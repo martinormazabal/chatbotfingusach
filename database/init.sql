@@ -151,7 +151,7 @@ ALTER TABLE requests
 -- Índices recomendados para FTS y trigram
 CREATE INDEX IF NOT EXISTS idx_documents_tsv
   ON documents
-  USING GIN (to_tsvector('spanish', unaccent(coalesce(title,'') || ' ' || coalesce(content,''))));
+  USING GIN (to_tsvector('spanish', coalesce(title,'') || ' ' || coalesce(content,'')));
 
 CREATE INDEX IF NOT EXISTS idx_documents_title_trgm
   ON documents
@@ -160,12 +160,6 @@ CREATE INDEX IF NOT EXISTS idx_documents_title_trgm
 CREATE INDEX IF NOT EXISTS idx_documents_content_trgm
   ON documents
   USING GIN (content gin_trgm_ops);
-
--- Antes (puede disparar IMMUTABLE)
-CREATE INDEX docs_fts_idx ON docs USING gin (to_tsvector(content));
-
--- Después (config fija)
-CREATE INDEX docs_fts_idx ON docs USING gin (to_tsvector('spanish', content));
 
 COMMIT;
 --Verificar permisos (opcional)

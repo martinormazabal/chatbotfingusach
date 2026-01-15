@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$here/pg.env"
+[ -f "$here/pg.env" ] && source "$here/pg.env"
 
+: "${PGHOST:=127.0.0.1}"
+: "${PGDATA:=$here/.pgdata}"
 PORTFILE="$PGDATA/PORT"
-PGPORT="${PGPORT_PRIMARY}"
 
-if [ -f "$PORTFILE" ]; then
-  PGPORT="$(cat "$PORTFILE")"
-fi
+PGPORT="${PGPORT_PRIMARY:-5432}"
+[ -f "$PORTFILE" ] && PGPORT="$(cat "$PORTFILE")"
 
 exec psql -h "$PGHOST" -p "$PGPORT" "$@"

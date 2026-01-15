@@ -2,7 +2,6 @@
 require("dotenv").config();
 const fs = require("fs");
 const { Pool } = require("pg");
-const format = require("pg-format");
 const path = require('path');
 const { ensurePostgresRunning } = require("./postgresManager");
 
@@ -15,13 +14,13 @@ console.log('Pool config:', {
   port: process.env.DB_PORT,
   database: process.env.DB_NAME
 });
-const dbUser = process.env.DB_USER || 'chatbotuser';
-const dbPassword = process.env.DB_PASSWORD || 'cp1619comm2k1';
-const dbHost = process.env.DB_HOST || 'localhost';
+const dbUser = process.env.DB_USER || "chatbotuser";
+const dbPassword = process.env.DB_PASSWORD || "cp1619comm2k1";
+const dbHost = process.env.DB_HOST || "localhost";
 const dbPort = process.env.DB_PORT || 5432;
-const dbName = process.env.DB_NAME || 'chatbotdb';
-const adminPassword = process.env.DB_ADMIN_PASSWORD || '';
-const adminDatabase = process.env.DB_ADMIN_DB || 'postgres';
+const dbName = process.env.DB_NAME || "chatbotdb";
+const adminPassword = process.env.DB_ADMIN_PASSWORD || "";
+const adminDatabase = process.env.DB_ADMIN_DB || "postgres";
 const adminUserCandidates = [
   process.env.DB_ADMIN_USER,
   process.env.PGUSER,
@@ -31,6 +30,7 @@ const adminUserCandidates = [
 ].filter(Boolean);
 
 const isSafeIdentifier = (identifier) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier);
+const escapeLiteral = (value) => String(value).replace(/'/g, "''");
 
 if (![dbUser, dbName].every(isSafeIdentifier)) {
   throw new Error("Invalid database identifier. Use alphanumeric characters and underscores only.");
@@ -98,29 +98,39 @@ const resolveAdminPool = async () => {
 };
 
 // Ejecutar init.sql
-const initFilePath = path.resolve(__dirname, 'init.sql');
+const initFilePath = path.resolve(__dirname, "init.sql");
 
 const ensureRoleAndDatabase = async (adminPool) => {
-  const roleResult = await adminPool.query(
-    "SELECT 1 FROM pg_roles WHERE rolname = $1",
-    [dbUser]
-  );
+  const roleNameLiteral = escapeLiteral(dbUser);
+  const rolePasswordLiteral = escapeLiteral(dbPassword);
+  const databaseNameLiteral = escapeLiteral(dbName);
 
-  if (roleResult.rowCount === 0) {
-    await adminPool.query(format("CREATE ROLE %I WITH LOGIN PASSWORD %L", dbUser, dbPassword));
-  }
+  await adminPool.query(`
+    DO $$
+    DECLARE
+      role_name text := '${roleNameLiteral}';
+      role_password text := '${rolePasswordLiteral}';
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+        EXECUTE format('CREATE ROLE %I WITH LOGIN PASSWORD %L', role_name, role_password);
+      END IF;
 
-  await adminPool.query(format("ALTER ROLE %I CREATEDB", dbUser));
-  await adminPool.query(format("ALTER ROLE %I CREATEROLE", dbUser));
+      EXECUTE format('ALTER ROLE %I CREATEDB', role_name);
+      EXECUTE format('ALTER ROLE %I CREATEROLE', role_name);
+    END $$;
+  `);
 
-  const dbResult = await adminPool.query(
-    "SELECT 1 FROM pg_database WHERE datname = $1",
-    [dbName]
-  );
-
-  if (dbResult.rowCount === 0) {
-    await adminPool.query(format("CREATE DATABASE %I OWNER %I", dbName, dbUser));
-  }
+  await adminPool.query(`
+    DO $$
+    DECLARE
+      db_name text := '${databaseNameLiteral}';
+      owner_name text := '${roleNameLiteral}';
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = db_name) THEN
+        EXECUTE format('CREATE DATABASE %I OWNER %I', db_name, owner_name);
+      END IF;
+    END $$;
+  `);
 };
 
 const setup = async () => {
@@ -156,7 +166,7 @@ const setup = async () => {
       process.exit(1);
     }
 
-    const initSQL = fs.readFileSync(initFilePath, 'utf8');
+    const initSQL = fs.readFileSync(initFilePath, "utf8");
     await pool.query(initSQL);
     console.log("✅ Repositorio instalado exitosamente");
   } catch (error) {
