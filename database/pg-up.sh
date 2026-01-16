@@ -85,22 +85,34 @@ fi
 
 port_free() { (echo >/dev/tcp/${PGHOST}/$1) >/dev/null 2>&1 && return 1 || return 0; }
 
-pick_port() {
-  for p in "$PGPORT_PRIMARY" "$PGPORT_FALLBACK" $(seq 5434 5450); do
-    if port_free "$p"; then echo "$p"; return 0; fi
-  done
-  echo "No hay puertos libres entre 5432-5450" >&2
-  return 1
+pick_ports() {
+  echo "$PGPORT_PRIMARY" "$PGPORT_FALLBACK"
+  seq 5434 5450
 }
 
-PGPORT="$(pick_port)"
-echo "$PGPORT" > "$PORTFILE"
+start_postgres() {
+  local port="$1"
+  echo "[pg-up] starting postgres en $PGHOST:$port ..."
+  # Equivalente a: pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
+  pg_ctl -D "$PGDATA" -l "$LOGFILE" start -w \
+    -o "-h ${PGHOST} -p ${port} -k ${PGDATA}" >/dev/null
+}
 
-echo "[pg-up] starting postgres en $PGHOST:$PGPORT ..."
-# Equivalente a: pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
-if ! pg_ctl -D "$PGDATA" -l "$LOGFILE" start -w \
-  -o "-h ${PGHOST} -p ${PGPORT} -k ${PGDATA}" >/dev/null; then
-  echo "[pg-up] ERROR: postgres no pudo iniciar. Log (últimas 200 líneas):"
+PGPORT=""
+for candidate in $(pick_ports); do
+  if ! port_free "$candidate"; then
+    continue
+  fi
+
+  if start_postgres "$candidate"; then
+    PGPORT="$candidate"
+    echo "$PGPORT" > "$PORTFILE"
+    break
+  fi
+done
+
+if [ -z "$PGPORT" ]; then
+  echo "[pg-up] ERROR: postgres no pudo iniciar en 5432-5450. Log (últimas 200 líneas):"
   tail -n 200 "$LOGFILE" || true
   exit 1
 fi

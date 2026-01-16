@@ -53,10 +53,7 @@ cd database
 chmod u+x pg-up.sh psql.sh
 initdb -D .pgdata -U postgres --auth=trust --encoding=UTF8 --locale=C
 pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
-bash ./pg-up.sh
-./psql.sh -U postgres -d postgres -f 01_roles.sql
-./psql.sh -U postgres -d postgres -f 02_createdb.sql
-./psql.sh -U chatbotuser -d chatbotdb -f init.sql
+./pg-up.sh
 node setupDatabase.js
 ```
 
@@ -73,21 +70,60 @@ npm install
 
 ## 🧰 PostgreSQL local en `database/.pgdata` (Firebase Studio)
 
-Si se borra `database/.pgdata`, se elimina el clúster completo (PGDATA) y debe recrearse con `initdb`.
+En Firebase Studio / Cloud Workstations se levanta PostgreSQL como un clúster local dentro de `database/.pgdata`.
 
-### Iniciar
+### Iniciar (camino feliz)
 
 ```bash
 cd database
 chmod u+x pg-up.sh psql.sh
 ./pg-up.sh
+node setupDatabase.js
 ```
+
+### Arranque manual (primer uso / troubleshooting)
+
+```bash
+cd database
+chmod u+x pg-up.sh psql.sh
+
+# Inicializa el clúster (solo si .pgdata no existe o está vacío)
+initdb -D .pgdata -U postgres --auth=trust --encoding=UTF8 --locale=C
+```
+
+Opción A: puerto 5432 (por defecto):
+
+```bash
+pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p5432 -k $(pwd)/.pgdata"
+./pg-up.sh
+node setupDatabase.js
+```
+
+Opción B: puerto 5433 (si 5432 está ocupado)
+
+Si estás ejecutando el repositorio en el mismo PC pero en otra cuenta/workspace en paralelo, puede existir otro PostgreSQL escuchando en 5432.
+En ese caso, el arranque con -p5432 puede fallar con:
+
+```
+waiting for server to start.... stopped waiting / pg_ctl: could not start server
+```
+
+Repite usando 5433:
+
+```bash
+pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p5433 -k $(pwd)/.pgdata"
+./pg-up.sh
+node setupDatabase.js
+```
+
+Nota: `pg-up.sh` intenta 5432 y si no puede, cae a 5433 (y luego 5434-5450). El puerto efectivo queda en `database/.pgdata/PORT` y es el que usa `setupDatabase.js`.
 
 ### Reset total (borra DB local)
 
 ```bash
 rm -rf database/.pgdata
 cd database && ./pg-up.sh
+node setupDatabase.js
 ```
 
 ### Error típico: `/run/postgresql/.s.PGSQL.5432.lock` no existe
@@ -98,7 +134,7 @@ La solución es forzar el socket dentro de `.pgdata` (opción `-k`) o desactivar
 - **Recomendado (socket en `.pgdata`)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -k $PGDATA"`
 - **Alternativa (solo TCP)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -c unix_socket_directories=''"`
 
-### Comando manual equivalente
+### Recovery / Reset avanzado (solo si falla)
 
 Dentro de `database/`:
 

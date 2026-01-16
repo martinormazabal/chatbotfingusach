@@ -5,7 +5,7 @@ const { Pool } = require("pg");
 const path = require('path');
 const { ensurePostgresRunning } = require("./postgresManager");
 
-ensurePostgresRunning();
+const { host: runtimeHost, port: runtimePort } = ensurePostgresRunning();
 // Verificar y depurar la configuración del Pool
 console.log('Pool config:', {
   user: process.env.DB_USER,
@@ -16,8 +16,8 @@ console.log('Pool config:', {
 });
 const dbUser = process.env.DB_USER || "chatbotuser";
 const dbPassword = process.env.DB_PASSWORD || "cp1619comm2k1";
-const dbHost = process.env.DB_HOST || "localhost";
-const dbPort = process.env.DB_PORT || 5432;
+const dbHost = process.env.DB_HOST || runtimeHost || "localhost";
+const dbPort = Number(process.env.DB_PORT || runtimePort);
 const dbName = process.env.DB_NAME || "chatbotdb";
 const adminPassword = process.env.DB_ADMIN_PASSWORD || "";
 const adminDatabase = process.env.DB_ADMIN_DB || "postgres";
@@ -120,17 +120,14 @@ const ensureRoleAndDatabase = async (adminPool) => {
     END $$;
   `);
 
-  await adminPool.query(`
-    DO $$
-    DECLARE
-      db_name text := '${databaseNameLiteral}';
-      owner_name text := '${roleNameLiteral}';
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = db_name) THEN
-        EXECUTE format('CREATE DATABASE %I OWNER %I', db_name, owner_name);
-      END IF;
-    END $$;
-  `);
+  const dbExists = await adminPool.query(
+    "SELECT 1 FROM pg_database WHERE datname = $1",
+    [dbName]
+  );
+
+  if (dbExists.rowCount === 0) {
+    await adminPool.query(`CREATE DATABASE "${dbName}" OWNER "${dbUser}"`);
+  }
 };
 
 const setup = async () => {

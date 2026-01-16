@@ -20,7 +20,7 @@ function ensurePostgresRunning() {
 
   // si tu app usa DB_*:
   process.env.DB_HOST = process.env.DB_HOST || process.env.PGHOST;
-  process.env.DB_PORT = process.env.DB_PORT || port;
+  process.env.DB_PORT = port;
 
   return { host: process.env.PGHOST, port: Number(port) };
 }
