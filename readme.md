@@ -172,6 +172,25 @@ La solución es forzar el socket dentro de `.pgdata` (opción `-k`) o desactivar
 - **Recomendado (socket en `.pgdata`)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -k $PGDATA"`
 - **Alternativa (solo TCP)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -c unix_socket_directories=''"`
 
+## Error 401 en el preview (Cloud Workstations / Firebase Studio)
+
+Síntoma al abrir `http://localhost:3000`:
+`401: The Workstation does not exist or your currently signed in account does not have access to it`
+(Workstations.GenerateAccessToken / PERMISSION_DENIED)
+
+Causa típica:
+El navegador está usando una cuenta de Google distinta a la que tiene acceso al workspace/workstation
+(o hay múltiples cuentas abiertas y se toma la equivocada).
+
+Solución rápida (recomendada):
+1) Abrir el proyecto en una ventana **Modo incógnito** (o en un perfil de navegador separado).
+2) Iniciar sesión solo con la cuenta que tiene acceso al workspace.
+3) Reabrir el preview del puerto 3000.
+
+Si persiste:
+Revisar configuración de cookies del navegador: Firebase Studio puede requerir permitir cookies de terceros
+(según la guía oficial de troubleshooting).
+
 ### Recovery / Reset avanzado (solo si falla)
 
 Dentro de `database/`:
