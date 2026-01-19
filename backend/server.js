@@ -11,7 +11,6 @@ const path = require("path");
 
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
-const pool = require("./db");
 const removeMd = require('remove-markdown');
 const { ensurePostgresRunning } = require("../database/postgresManager");
 const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
@@ -35,6 +34,7 @@ function sanitize(text) {
   return clean.trim();
 }
 ensurePostgresRunning();
+const pool = require("./db");
 
 const INIT_RETRY_DELAY_MS = 5000;
 

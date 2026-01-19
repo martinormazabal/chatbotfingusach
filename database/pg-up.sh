@@ -85,21 +85,47 @@ fi
 
 port_free() { (echo >/dev/tcp/${PGHOST}/$1) >/dev/null 2>&1 && return 1 || return 0; }
 
+validate_port() {
+  local port="$1"
+  if [ -z "${port:-}" ] || ! [[ "$port" =~ ^[0-9]+$ ]]; then
+    echo "[pg-up] ERROR: puerto inválido '${port}'. Debe ser numérico y no vacío." >&2
+    return 1
+  fi
+}
+
 pick_ports() {
   echo "$PGPORT_PRIMARY" "$PGPORT_FALLBACK"
   seq 5434 5450
 }
 
+update_postgres_conf_port() {
+  local port="$1"
+  validate_port "$port"
+
+  if grep -qE '^[#[:space:]]*port[[:space:]]*=' "$PGDATA/postgresql.conf"; then
+    sed -i.bak -E "s/^[#[:space:]]*port[[:space:]]*=.*/port = ${port}/" "$PGDATA/postgresql.conf"
+  else
+    echo "port = ${port}" >> "$PGDATA/postgresql.conf"
+  fi
+}
+
 start_postgres() {
   local port="$1"
+  validate_port "$port"
+  update_postgres_conf_port "$port"
   echo "[pg-up] starting postgres en $PGHOST:$port ..."
   # Equivalente a: pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
-  pg_ctl -D "$PGDATA" -l "$LOGFILE" start -w \
-    -o "-h ${PGHOST} -p ${port} -k ${PGDATA}" >/dev/null
+    if ! pg_ctl -D "$PGDATA" -l "$LOGFILE" start -w \
+    -o "-h ${PGHOST} -p ${port} -k ${PGDATA}" >/dev/null; then
+    echo "[pg-up] ERROR: no se pudo iniciar postgres en ${PGHOST}:${port}. Log (últimas 200 líneas):"
+    tail -n 200 "$LOGFILE" || true
+    return 1
+  fi
 }
 
 PGPORT=""
 for candidate in $(pick_ports); do
+  validate_port "$candidate"
   if ! port_free "$candidate"; then
     continue
   fi

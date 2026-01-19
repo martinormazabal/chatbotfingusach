@@ -13,6 +13,9 @@ function ensurePostgresRunning() {
 
   const portFile = path.join(cwd, ".pgdata", "PORT");
   const port = fs.readFileSync(portFile, "utf8").trim();
+  if (!port || !/^\d+$/.test(port)) {
+    throw new Error(`PORT inválido en ${portFile}: "${port}"`);
+  }
 
   // Sincroniza variables para el resto del proyecto
   process.env.PGHOST = process.env.PGHOST || "127.0.0.1";
@@ -22,7 +25,7 @@ function ensurePostgresRunning() {
   process.env.DB_HOST = process.env.DB_HOST || process.env.PGHOST;
   process.env.DB_PORT = port;
 
-  return { host: process.env.PGHOST, port: Number(port) };
+  return { host: "localhost", port: Number(port) };
 }
 
 module.exports = { ensurePostgresRunning };

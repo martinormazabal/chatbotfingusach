@@ -46,7 +46,7 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
 2. Crea una nueva API Key y copia el valor generado; no la compartas públicamente.
 3. Pega la clave en la variable `GEMINI_API_KEY` de tu archivo `.env` del backend (o en tu configuración de Firebase/IDX) y reinicia el servicio para que tome efecto.
 
-3. Inicializar base de datos (modo local):
+3. Inicializar base de datos (modo local, solo funciona si busca montar por primera vez):
 
 ```bash
 cd database
@@ -62,9 +62,27 @@ node setupDatabase.js
 ```bash
 cd backend
 npm install
+npm audit fix
 cd ../frontend
 npm install
+npm audit fix
 ```
+
+---
+
+## ✅ Camino feliz (npm run dev desde frontend)
+
+Desde `frontend/`, el comando:
+
+```bash
+npm run dev
+```
+
+1. Arranca PostgreSQL local en `database/.pgdata`.
+2. Elige automáticamente un puerto libre (5432, 5433, 5434...).
+3. Guarda el puerto real en `database/.pgdata/PORT`.
+4. Crea el rol/BD `chatbotdb`, ejecuta `init.sql` y valida tablas.
+5. Levanta backend + Next.js en paralelo.
 
 ---
 
@@ -116,7 +134,7 @@ pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p5433 -k $(pw
 node setupDatabase.js
 ```
 
-Nota: `pg-up.sh` intenta 5432 y si no puede, cae a 5433 (y luego 5434-5450). El puerto efectivo queda en `database/.pgdata/PORT` y es el que usa `setupDatabase.js`.
+Nota: `pg-up.sh` intenta 5432 y si no puede, cae a 5433 (y luego 5434-5450). El puerto efectivo queda en `database/.pgdata/PORT` y es el que usa `setupDatabase.js` y el backend.
 
 ### Reset total (borra DB local)
 
@@ -125,6 +143,8 @@ rm -rf database/.pgdata
 cd database && ./pg-up.sh
 node setupDatabase.js
 ```
+
+Si el clúster quedó corrupto o el puerto cambió, borrar `database/.pgdata` fuerza un reinicio limpio y la regeneración de `PORT`.
 
 ### Error típico: `/run/postgresql/.s.PGSQL.5432.lock` no existe
 

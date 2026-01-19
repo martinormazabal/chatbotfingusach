@@ -17,7 +17,7 @@ console.log('Pool config:', {
 const dbUser = process.env.DB_USER || "chatbotuser";
 const dbPassword = process.env.DB_PASSWORD || "cp1619comm2k1";
 const dbHost = process.env.DB_HOST || runtimeHost || "localhost";
-const dbPort = Number(process.env.DB_PORT || runtimePort);
+const dbPort = Number(runtimePort || process.env.DB_PORT || runtimePort);
 const dbName = process.env.DB_NAME || "chatbotdb";
 const adminPassword = process.env.DB_ADMIN_PASSWORD || "";
 const adminDatabase = process.env.DB_ADMIN_DB || "postgres";
@@ -130,6 +130,26 @@ const ensureRoleAndDatabase = async (adminPool) => {
   }
 };
 
+const verifyDatabaseState = async (adminPool, userPool) => {
+  const dbExists = await adminPool.query(
+    "SELECT 1 FROM pg_database WHERE datname = $1",
+    [dbName]
+  );
+
+  if (dbExists.rowCount === 0) {
+    throw new Error(`No se encontró la base de datos ${dbName}.`);
+  }
+
+  const tableCheck = await userPool.query(
+    "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1",
+    ["users"]
+  );
+
+  if (tableCheck.rowCount === 0) {
+    throw new Error("La tabla requerida 'users' no existe en la base de datos.");
+  }
+};
+
 const setup = async () => {
   let resolvedAdmin;
   try {
@@ -144,6 +164,7 @@ const setup = async () => {
     const adminReady = await waitForDatabase(adminPool);
     if (!adminReady.ready) {
       await adminPool.end();
+      await verifyDatabaseState(adminPool, pool);
       process.exit(1);
     }
 
