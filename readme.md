@@ -21,6 +21,12 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
    git clone https://github.com/TU-USUARIO/chatbot-usach.git
    cd chatbot-usach
    ```
+### Explicación breve para que quede claro en el clonar otra cuenta en paralelo
+
+- Si se clona el repo en otra cuenta/workspace y se ejecuta `npm run dev` sin instalar dependencias, el shell `/bin/sh` no encuentra `next` porque **no existe el binario local** todavía.  
+- Con `npm install`, npm enlaza ejecutables en `./node_modules/.bin`, y `npm run` los expone en el `PATH`, por eso `next dev` funciona sin usar rutas largas.
+
+Si quieres, también puedo ayudarte a dejar un comando único tipo `scripts/bootstrap.sh` (instalar frontend+backend+database de una sola vez) para que el README quede aún más simple, pero el bloque anterior ya cubre el error real que te pasó.
 
 2. Configurar variables de entorno. Crear un archivo .env en la raíz del backend con:
 
@@ -59,8 +65,20 @@ node setupDatabase.js
 
 4. Instalar dependencias:
 
+Este repositorio tiene múltiples proyectos (frontend/backend/database).  
+Después de clonar, **es obligatorio instalar dependencias** en cada carpeta que tenga `package.json`, o aparecerán errores como:
+
+- `/bin/sh: next: command not found`
+- `Cannot find module ...`
+
+> Nota: cuando se ejecuta `npm run <script>`, npm agrega `node_modules/.bin` al `PATH`, por lo que comandos como `next` deberían funcionar **solo si** se instalaron dependencias localmente. :contentReference[oaicite:1]{index=1}  
+> `next` es el CLI de Next.js (lo provee el paquete `next`).
+
 ```bash
-cd backend
+cd ../database
+npm install
+npm audit fix
+cd ../backend
 npm install
 npm audit fix
 cd ../frontend
