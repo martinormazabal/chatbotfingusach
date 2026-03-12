@@ -1,9 +1,12 @@
 import React from 'react';
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from 'next/router';
+import { isRootAdminEmail } from '../../lib/rbac';
 import styles from "./createUser.module.css";
 
 export default function CreateUser() {
+  const router = useRouter();
   const [formData, setFormData] = useState({
     username: "",
     email: "",
@@ -12,6 +15,46 @@ export default function CreateUser() {
   });
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [currentUserRole, setCurrentUserRole] = useState('');
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
+
+  const accessSource = useMemo(
+    () => (typeof router.query.source === 'string' ? router.query.source : ''),
+    [router.query.source]
+  );
+
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) {
+      const canSelfRegister = accessSource === 'login';
+      setIsAuthorized(canSelfRegister);
+      if (!canSelfRegister) {
+        setMessage('Solo Funcionario/Admin o acceso desde login pueden crear usuarios.');
+      }
+      return;
+    }
+
+    try {
+      const parsedUser = JSON.parse(rawUser);
+      const role = (parsedUser?.role || parsedUser?.user?.role || '').toLowerCase();
+      const email = (parsedUser?.email || parsedUser?.user?.email || '').toLowerCase();
+      const allowed = role === 'funcionario' || role === 'admin' || isRootAdminEmail(email) || accessSource === 'login';
+      setCurrentUserRole(role);
+      setCurrentUserEmail(email);
+      setIsAuthorized(allowed);
+      if (!allowed) {
+        setMessage('No tienes permisos para crear usuarios.');
+      }
+    } catch {
+      setIsAuthorized(false);
+      setCurrentUserRole('');
+      setCurrentUserEmail('');
+      setMessage('No se pudo validar tu sesión.');
+    }
+  }, [accessSource, router.isReady]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -19,12 +62,21 @@ export default function CreateUser() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isAuthorized) {
+      setMessage('No tienes permisos para crear usuarios.');
+      return;
+    }
     setIsLoading(true);
     setMessage(""); // Clear previous messages
     try {
       const res = await fetch("/api/users/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUserRole,
+          "x-user-email": currentUserEmail,
+          "x-access-source": accessSource,
+        },
         body: JSON.stringify(formData),
       });
       const data = await res.json();      
@@ -67,6 +119,12 @@ export default function CreateUser() {
           <h2>Crear nuevo usuario</h2>
           <p>Los campos marcados con * son obligatorios.</p>
         </header>
+
+        {!isAuthorized && (
+          <p className={styles.feedback} role="alert">
+            {message || 'Acceso denegado.'}
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className={styles.form}>
           <label className={styles.field}>
@@ -115,7 +173,7 @@ export default function CreateUser() {
             </select>
           </label>
 
-          <button type="submit" disabled={isLoading} className={styles.submitButton}>
+          <button type="submit" disabled={isLoading || !isAuthorized} className={styles.submitButton}>
             {isLoading ? "Creando..." : "Registrar"}
           </button>
 

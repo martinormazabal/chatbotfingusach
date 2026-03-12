@@ -19,7 +19,11 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     try {
       const response = await fetch(buildBackendApiUrl(backendUrl, "/api/users"), {
-        headers: { Authorization: req.headers.authorization || "" },
+        headers: {
+          Authorization: req.headers.authorization || "",
+          "x-user-role": req.headers["x-user-role"] || "",
+          "x-user-email": req.headers["x-user-email"] || "",
+        },
       });
       const data = await parseResponse(response);
       return res.status(response.status).json(data);
@@ -38,6 +42,8 @@ export default async function handler(req, res) {
         headers: {
           "Content-Type": "application/json",
           Authorization: req.headers.authorization || "",
+          "x-user-role": req.headers["x-user-role"] || "",
+          "x-user-email": req.headers["x-user-email"] || "",
         },
         body: JSON.stringify(req.body),
       });

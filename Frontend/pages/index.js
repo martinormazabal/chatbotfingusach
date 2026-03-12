@@ -3,7 +3,7 @@ import React from 'react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { can } from '../lib/rbac';
+import { canForUser } from '../lib/rbac';
 import styles from './home.module.css';
 
 export default function Home() {
@@ -12,7 +12,10 @@ export default function Home() {
 
   useEffect(() => {
     const userData = localStorage.getItem('user');
-    if (userData) setUser(JSON.parse(userData));
+    if (userData) {
+      const parsed = JSON.parse(userData);
+      setUser(parsed?.user || parsed);
+    }
   }, []);
 
   const logout = () => {
@@ -39,21 +42,23 @@ export default function Home() {
 
   const visibility = useMemo(() => {
     if (!normalizedRole) {
-      return {
-        showUsers: true,
-        showDocuments: true,
-        showChatbot: true,
-      };
+      if (!user?.email) {
+        return {
+          showUsers: false,
+          showDocuments: false,
+          showChatbot: false,
+        };
+      }
     }
 
-    const normalizedRole = role.toLowerCase();
+//    const normalizedRole = role.toLowerCase();
 
     return {
-      showUsers: can(normalizedRole, 'manage_users'),
-      showDocuments: can(normalizedRole, 'manage_docs'),
-      showChatbot: can(normalizedRole, 'chat'),
+      showUsers: canForUser(user, 'manage_users'),
+      showDocuments: canForUser(user, 'manage_docs'),
+      showChatbot: canForUser(user, 'chat'),
     };
-  }, [normalizedRole]);
+  }, [normalizedRole, user]);
 
   const emptyState = !user && (
     <section className={styles.section}>
@@ -109,7 +114,7 @@ export default function Home() {
               <p>Administra cuentas y roles de forma segura y consistente.</p>
             </div>
             <div className={styles.actionGrid}>
-              <Link href="/admin/create-user" legacyBehavior>
+              <Link href="/admin/create-user?source=login" legacyBehavior>
                 <a className={`${styles.actionCard} ${styles.actionPrimary}`}>
                   <h3>Crear Usuario</h3>
                   <p>Registra nuevas personas con perfiles alineados al rol institucional.</p>

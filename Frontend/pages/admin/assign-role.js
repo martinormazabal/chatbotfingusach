@@ -1,6 +1,7 @@
 // frontend/pages/admin/assign-role.js
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { isRootAdminEmail } from '../../lib/rbac';
 import styles from "./assignRole.module.css";
 
 const PROTECTED_EMAIL = 'admin@usach.cl';
@@ -29,11 +30,48 @@ export default function AssignRolePage() {
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [currentUserRole, setCurrentUserRole] = useState("");
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
 
   useEffect(() => {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) {
+      setIsAuthorized(false);
+      setMessage('No tienes permisos para asignar roles.');
+      return;
+    }
+
+    try {
+      const parsedUser = JSON.parse(rawUser);
+      const role = (parsedUser?.role || parsedUser?.user?.role || '').toLowerCase();
+      const email = (parsedUser?.email || parsedUser?.user?.email || '').toLowerCase();
+      const allowed = role === 'funcionario' || role === 'admin' || isRootAdminEmail(email);
+      setCurrentUserRole(role);
+      setCurrentUserEmail(email);
+      setIsAuthorized(allowed);
+      if (!allowed) {
+        setMessage('No tienes permisos para asignar roles.');
+      }
+    } catch {
+      setIsAuthorized(false);
+      setMessage('No se pudo validar tu sesión.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthorized) {
+      return;
+    }
+
     async function fetchUsers() {
       try {
-        const res = await fetch("/api/users");
+        const res = await fetch("/api/users", {
+          headers: {
+            'x-user-role': currentUserRole,
+            'x-user-email': currentUserEmail,
+          },
+        });
         if (!res.ok) throw new Error(`Error ${res.status}`);
         const data = await parseJsonSafe(res);
         const sanitized = Array.isArray(data) ? data.filter(user => user.email !== PROTECTED_EMAIL) : [];
@@ -45,7 +83,7 @@ export default function AssignRolePage() {
       }
     }
     fetchUsers();
-  }, []);
+  }, [currentUserEmail, currentUserRole, isAuthorized]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -54,13 +92,18 @@ export default function AssignRolePage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isAuthorized) return setMessage("No tienes permisos para asignar roles.");
     if (!formData.userId) return setMessage("Selecciona un usuario.");
     setIsLoading(true);
     setMessage("");
     try {
       const res = await fetch(`/api/users/${formData.userId}/role`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          'x-user-role': currentUserRole,
+          'x-user-email': currentUserEmail,
+        },
         body: JSON.stringify({ role: formData.role }),
       });
       const data = await parseJsonSafe(res);
@@ -90,11 +133,16 @@ export default function AssignRolePage() {
 
   const deleteSelectedUsers = async () => {
     if (!selectedUsers.length) return setMessage("Selecciona al menos un usuario.");
+    if (!isAuthorized) return setMessage("No tienes permisos para eliminar usuarios.");
     if (!confirm("¿Eliminar seleccionados?")) return;
     try {
       const res = await fetch("/api/users", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          'x-user-role': currentUserRole,
+          'x-user-email': currentUserEmail,
+        },
         body: JSON.stringify({ ids: selectedUsers }),
       });
       const data = await parseJsonSafe(res);
@@ -176,7 +224,7 @@ export default function AssignRolePage() {
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || !isAuthorized}
               className={styles.primaryButton}
             >
               {isLoading ? "Actualizando..." : "Asignar rol"}
@@ -207,7 +255,7 @@ export default function AssignRolePage() {
           </div>
           <button
             onClick={deleteSelectedUsers}
-            disabled={!selectedUsers.length}
+            disabled={!selectedUsers.length || !isAuthorized}
             className={styles.dangerButton}
           >
             Eliminar seleccionados

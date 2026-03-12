@@ -7,7 +7,12 @@ export default async function handler(req, res) {
     try {
       const response = await fetch(buildBackendApiUrl(backendUrl, "/api/users/register"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": req.headers["x-user-role"] || "",
+          "x-user-email": req.headers["x-user-email"] || "",
+          "x-access-source": req.headers["x-access-source"] || "",
+        },
         body: JSON.stringify(req.body),
       });
       const data = await response.json();

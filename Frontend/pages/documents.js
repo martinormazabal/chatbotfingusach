@@ -2,14 +2,14 @@ import React from 'react';
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import Link from "next/link";
-import { can } from "../lib/rbac";
+import { can, isRootAdminEmail } from "../lib/rbac";
 import styles from "./documents.module.css";
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState([]);
   const [expandedId, setExpandedId] = useState(null);
   const [currentContent, setCurrentContent] = useState('');
-  const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [isLoadingContent] = useState(false);
   const [isProcessingOCR, setIsProcessingOCR] = useState(null); // Track OCR processing by ID
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState('');
@@ -49,8 +49,8 @@ export default function DocumentsPage() {
     if (storedUser) {
       try {
         const parsedUser = JSON.parse(storedUser);
-        setUserRole(parsedUser.role || '');
-        setUserEmail(parsedUser.email || '');
+        setUserRole(parsedUser?.role || parsedUser?.user?.role || '');
+        setUserEmail(parsedUser?.email || parsedUser?.user?.email || '');
       } catch (storageError) {
         console.warn('No se pudo leer el usuario almacenado:', storageError);
         setUserRole('');
@@ -66,8 +66,8 @@ export default function DocumentsPage() {
   );
 
   const canDeleteDocuments = useMemo(
-    () => can(normalizedRole, "manage_docs"),
-    [normalizedRole]
+    () => can(normalizedRole, "manage_docs") || isRootAdminEmail(userEmail),
+    [normalizedRole, userEmail]
   );
 
 
@@ -145,7 +145,12 @@ export default function DocumentsPage() {
     }
     if (window.confirm("¿Estás seguro de que quieres eliminar este documento?")) {
       try {
-        await axios.delete(`/api/documents/${id}`);
+        await axios.delete(`/api/documents/${id}`, {
+          headers: {
+            'x-user-role': normalizedRole,
+            'x-user-email': userEmail,
+          },
+        });
         setDocuments(prevDocs => prevDocs.filter(doc => doc.id !== id));
         setSuccessMessage("Documento eliminado exitosamente.");
         setError('');

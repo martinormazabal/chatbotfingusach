@@ -16,9 +16,9 @@ export default function LoginPage() {
     e.preventDefault();
     try {
       const res = await axios.post('/api/login', { email, password });
-      localStorage.setItem('user', JSON.stringify(res.data));
+      localStorage.setItem('user', JSON.stringify(res.data?.user || res.data));
       router.push('/');
-    } catch (err) {
+    } catch {
       setError('Correo o contraseña incorrectos');
     }
   };
@@ -64,7 +64,7 @@ export default function LoginPage() {
           <p className={styles.helperText}>¿Olvidaste tu contraseña? Contacta a soporte TI de USACH.</p>
           <p className={styles.helperText}>
             ¿Aún no tienes acceso?{' '}
-            <Link href="/admin/create-user" legacyBehavior>
+            <Link href="/admin/create-user?source=login" legacyBehavior>
               <a className={styles.ctaLink}>Crear cuentas</a>
             </Link>
           </p>

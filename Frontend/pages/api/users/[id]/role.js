@@ -27,6 +27,8 @@ async function forwardRoleUpdate({ url, method, req }) {
     headers: {
       "Content-Type": "application/json",
       Authorization: req.headers.authorization || "",
+      "x-user-role": req.headers["x-user-role"] || "",
+      "x-user-email": req.headers["x-user-email"] || "",
     },
     body: JSON.stringify(req.body),
   });
