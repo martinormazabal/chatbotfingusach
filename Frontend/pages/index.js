@@ -3,7 +3,7 @@ import React from 'react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { canForUser } from '../lib/rbac';
+import { can, isRootAdminEmail } from '../lib/rbac';
 import styles from './home.module.css';
 
 export default function Home() {
@@ -41,8 +41,9 @@ export default function Home() {
   }, [user?.username]);
 
   const visibility = useMemo(() => {
+    const isSuperAdmin = isRootAdminEmail(user?.email);
     if (!normalizedRole) {
-      if (!user?.email) {
+      if (!isSuperAdmin) {
         return {
           showUsers: false,
           showDocuments: false,
@@ -54,9 +55,9 @@ export default function Home() {
 //    const normalizedRole = role.toLowerCase();
 
     return {
-      showUsers: canForUser(user, 'manage_users'),
-      showDocuments: canForUser(user, 'manage_docs'),
-      showChatbot: canForUser(user, 'chat'),
+      showUsers: isSuperAdmin || can(normalizedRole, 'manage_users'),
+      showDocuments: isSuperAdmin || can(normalizedRole, 'manage_docs'),
+      showChatbot: isSuperAdmin || can(normalizedRole, 'chat'),
     };
   }, [normalizedRole, user]);
 
