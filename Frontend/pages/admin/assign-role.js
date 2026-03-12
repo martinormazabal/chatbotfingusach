@@ -4,8 +4,6 @@ import Link from "next/link";
 import { isRootAdminEmail } from '../../lib/rbac';
 import styles from "./assignRole.module.css";
 
-const PROTECTED_EMAIL = 'admin@usach.cl';
-
 async function parseJsonSafe(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -74,7 +72,9 @@ export default function AssignRolePage() {
         });
         if (!res.ok) throw new Error(`Error ${res.status}`);
         const data = await parseJsonSafe(res);
-        const sanitized = Array.isArray(data) ? data.filter(user => user.email !== PROTECTED_EMAIL) : [];
+        const sanitized = Array.isArray(data)
+          ? data.filter(user => !isRootAdminEmail(user?.email || ''))
+          : [];
         setUsers(sanitized);
       } catch (err) {
         console.error("Error fetching users:", err);

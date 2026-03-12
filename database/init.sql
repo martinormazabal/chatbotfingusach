@@ -107,7 +107,7 @@ ALTER TABLE users
   ADD CONSTRAINT users_role_check
   CHECK (role IN ('estudiante','funcionario','administrador de documentos','admin'));
 INSERT INTO users (username, email, password_hash, role)
-VALUES ('admin', 'admin@usach.cl', crypt('admin', gen_salt('bf')), 'admin')
+VALUES ('admin', '__ROOT_ADMIN_EMAIL__', crypt('admin', gen_salt('bf')), 'admin')
 ON CONFLICT (email) DO UPDATE
 SET
   username = EXCLUDED.username,

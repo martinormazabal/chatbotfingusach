@@ -99,6 +99,7 @@ const resolveAdminPool = async () => {
 
 // Ejecutar init.sql
 const initFilePath = path.resolve(__dirname, "init.sql");
+const rootAdminEmail = (process.env.ROOT_ADMIN_EMAIL || 'admin@usach.cl').toLowerCase();
 
 const ensureRoleAndDatabase = async (adminPool) => {
   const roleNameLiteral = escapeLiteral(dbUser);
@@ -185,7 +186,8 @@ const setup = async () => {
     }
 
     const initSQL = fs.readFileSync(initFilePath, "utf8");
-    await pool.query(initSQL);
+    const hydratedInitSQL = initSQL.replace(/__ROOT_ADMIN_EMAIL__/g, rootAdminEmail);
+    await pool.query(hydratedInitSQL);
     console.log("✅ Repositorio instalado exitosamente");
   } catch (error) {
     // Si el error indica que ya existen objetos, asumimos que ya está instalado.

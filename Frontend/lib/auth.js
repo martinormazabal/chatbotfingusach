@@ -1,4 +1,6 @@
-export const ADMIN_EMAIL = 'admin@usach.cl';
+const ROOT_ADMIN_EMAIL = (process.env.NEXT_PUBLIC_ROOT_ADMIN_EMAIL || 'admin@usach.cl').toLowerCase();
+
+export const ADMIN_EMAIL = ROOT_ADMIN_EMAIL;
 
 export const getStoredUser = () => {
   if (typeof window === 'undefined') return null;

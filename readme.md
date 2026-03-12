@@ -21,12 +21,6 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
    git clone https://github.com/TU-USUARIO/chatbot-usach.git
    cd chatbot-usach
    ```
-### Explicación breve para que quede claro en el clonar otra cuenta en paralelo
-
-- Si se clona el repo en otra cuenta/workspace y se ejecuta `npm run dev` sin instalar dependencias, el shell `/bin/sh` no encuentra `next` porque **no existe el binario local** todavía.  
-- Con `npm install`, npm enlaza ejecutables en `./node_modules/.bin`, y `npm run` los expone en el `PATH`, por eso `next dev` funciona sin usar rutas largas.
-
-Si quieres, también puedo ayudarte a dejar un comando único tipo `scripts/bootstrap.sh` (instalar frontend+backend+database de una sola vez) para que el README quede aún más simple, pero el bloque anterior ya cubre el error real que te pasó.
 
 2. Configurar variables de entorno. Crear un archivo .env en la raíz del backend con:
 
@@ -58,27 +52,15 @@ Si quieres, también puedo ayudarte a dejar un comando único tipo `scripts/boot
 cd database
 chmod u+x pg-up.sh psql.sh
 initdb -D .pgdata -U postgres --auth=trust --encoding=UTF8 --locale=C
-pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
+pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5433 -k $(pwd)/.pgdata"
 ./pg-up.sh
 node setupDatabase.js
 ```
 
 4. Instalar dependencias:
 
-Este repositorio tiene múltiples proyectos (frontend/backend/database).  
-Después de clonar, **es obligatorio instalar dependencias** en cada carpeta que tenga `package.json`, o aparecerán errores como:
-
-- `/bin/sh: next: command not found`
-- `Cannot find module ...`
-
-> Nota: cuando se ejecuta `npm run <script>`, npm agrega `node_modules/.bin` al `PATH`, por lo que comandos como `next` deberían funcionar **solo si** se instalaron dependencias localmente. :contentReference[oaicite:1]{index=1}  
-> `next` es el CLI de Next.js (lo provee el paquete `next`).
-
 ```bash
-cd ../database
-npm install
-npm audit fix
-cd ../backend
+cd backend
 npm install
 npm audit fix
 cd ../frontend
@@ -172,25 +154,6 @@ La solución es forzar el socket dentro de `.pgdata` (opción `-k`) o desactivar
 - **Recomendado (socket en `.pgdata`)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -k $PGDATA"`
 - **Alternativa (solo TCP)**: `pg_ctl ... -o "-h 127.0.0.1 -p 5432 -c unix_socket_directories=''"`
 
-## Error 401 en el preview (Cloud Workstations / Firebase Studio)
-
-Síntoma al abrir `http://localhost:3000`:
-`401: The Workstation does not exist or your currently signed in account does not have access to it`
-(Workstations.GenerateAccessToken / PERMISSION_DENIED)
-
-Causa típica:
-El navegador está usando una cuenta de Google distinta a la que tiene acceso al workspace/workstation
-(o hay múltiples cuentas abiertas y se toma la equivocada).
-
-Solución rápida (recomendada):
-1) Abrir el proyecto en una ventana **Modo incógnito** (o en un perfil de navegador separado).
-2) Iniciar sesión solo con la cuenta que tiene acceso al workspace.
-3) Reabrir el preview del puerto 3000.
-
-Si persiste:
-Revisar configuración de cookies del navegador: Firebase Studio puede requerir permitir cookies de terceros
-(según la guía oficial de troubleshooting).
-
 ### Recovery / Reset avanzado (solo si falla)
 
 Dentro de `database/`:
@@ -269,7 +232,7 @@ El siguiente plan permite ejecutar, documentar y presentar una demostración de 
      1. Ejecutar los pasos de instalación y levantar servicios según se describe en este README.
      2. (Opcional) Si se usa Firebase, desde la raíz correr `npm install --prefix functions` y luego `firebase emulators:start --only functions`. En Firebase Studio, verificar que el endpoint `api` enruta a las rutas Express habituales.
    - **Casos de prueba funcionales y de seguridad:**
-     1. Crear o confirmar la existencia del usuario demo `admin@usach.cl` en la base (contraseña inicial `admin`).
+     1. Crear o confirmar la existencia del usuario demo `ROOT_ADMIN_EMAIL` (por defecto `admin@usach.cl`) en la base (contraseña inicial `admin`).
      2. Iniciar sesión desde el frontend y navegar por las funcionalidades habilitadas para su rol.
      3. Intentar iniciar sesión con credenciales inválidas, cuentas inexistentes y combinaciones alteradas (contraseñas previas, tokens caducados) para comprobar el rechazo.
      4. Probar el restablecimiento y cambio de contraseña verificando que los tokens de recuperación de una sola vez se invalidan tras su uso.
@@ -288,7 +251,7 @@ El siguiente plan permite ejecutar, documentar y presentar una demostración de 
    - Documentar en una tabla la fecha, nombre y resultado de cada caso de prueba. Este registro puede mantenerse en el mismo README o en un anexo compartido durante la demostración.
 
 6. **Checklist final**
-   - Confirmar que el usuario demo `admin@usach.cl` permanece restringido a fines de prototipo.
+   - Confirmar que el usuario demo `ROOT_ADMIN_EMAIL` (por defecto `admin@usach.cl`) permanece restringido a fines de prototipo.
    - Verificar que no existan credenciales duras en el código y que las variables sensibles se gestionan mediante `.env`.
    - Revisar que las instrucciones de despliegue y autenticación incluyan advertencias de uso exclusivo para demostraciones.
 
@@ -339,7 +302,7 @@ Si al abrir el preview URL de Cloud Workstations aparece:
 
 1. Levantar backend y frontend como se indica arriba.
 2. Ingresar en navegador a http://localhost:3000
-3. Al ser un prototipo, debe ingresar con el correo del usuario "admin@usach.cl" y contraseña "admin".
+3. Al ser un prototipo, debe ingresar con el correo del usuario configurado en `ROOT_ADMIN_EMAIL` (por defecto `admin@usach.cl`) y contraseña "admin".
 4. Registrarse como usuario y probar:
 - Crear usuarios y asignar roles (menú administrador).
 - Verificar que el sistema envía contraseñas temporales y permite cambiarlas/restablecerlas con los nuevos flujos.
