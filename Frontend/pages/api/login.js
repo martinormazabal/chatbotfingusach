@@ -32,12 +32,13 @@ async function tryLogin(req, res, path) {
 
   const upstream = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", cookie: req.headers.cookie || "" },
     body: JSON.stringify(req.body ?? {}),
   });
 
+  const setCookie = upstream.headers.get("set-cookie");
   const payload = await parseJsonSafe(upstream);
-  return { status: upstream.status, payload };
+  return { status: upstream.status, payload, setCookie };
 }
 
 export default async function handler(req, res) {
@@ -61,5 +62,8 @@ export default async function handler(req, res) {
     if (last.status !== 404) break;
   }
 
+  if (last.setCookie) {
+    res.setHeader("set-cookie", last.setCookie);
+  }
   return res.status(last.status).json(last.payload);
 }

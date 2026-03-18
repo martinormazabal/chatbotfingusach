@@ -83,6 +83,43 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP NULL;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP NULL;
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash VARCHAR(255) NOT NULL,
+  jti VARCHAR(128) NOT NULL,
+  device_info TEXT DEFAULT NULL,
+  issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMP NOT NULL,
+  revoked BOOLEAN DEFAULT FALSE,
+  CONSTRAINT ux_refresh_jti UNIQUE (jti)
+);
+
+CREATE TABLE IF NOT EXISTS auth_security_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  email VARCHAR(255),
+  event_type VARCHAR(64) NOT NULL,
+  success BOOLEAN NOT NULL DEFAULT FALSE,
+  ip_address VARCHAR(64),
+  user_agent TEXT,
+  metadata JSONB,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens (user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires_at ON refresh_tokens (expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_security_logs_user_id ON auth_security_logs (user_id);
+
 CREATE TABLE IF NOT EXISTS evaluation_logs (
   id SERIAL PRIMARY KEY,
   case_id TEXT,
@@ -97,8 +134,6 @@ CREATE TABLE IF NOT EXISTS evaluation_logs (
   observaciones TEXT,
   created_at TIMESTAMP DEFAULT NOW()
 );
-
-
 
 -- Semilla admin (requiere pgcrypto, arriba creada)
 -- Asegurar el rol "admin" en la restricción de roles y el usuario admin
