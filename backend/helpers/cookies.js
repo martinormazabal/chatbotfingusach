@@ -1,58 +1,45 @@
-const crypto = require("crypto");
-const jwt = require("jsonwebtoken");
+const { parseDuration } = require("../auth/refreshTokens");
 
-const ISSUER = process.env.JWT_ISSUER || "chatbot-fing-usach";
-const AUDIENCE = process.env.JWT_AUDIENCE || "chatbot-clients";
-const ACCESS_EXP = process.env.JWT_ACCESS_EXP || "15m";
+const REFRESH_COOKIE_NAME = process.env.JWT_REFRESH_COOKIE_NAME || "refresh_token";
+const sameSite = (process.env.JWT_REFRESH_COOKIE_SAMESITE || "strict").toLowerCase();
 
-function getKey(name, pathName) {
-  const inlineValue = process.env[name];
-  if (inlineValue) {
-    return inlineValue.includes("\\n") ? inlineValue.replace(/\\n/g, "\n") : inlineValue;
-  }
-
-  const filePath = process.env[pathName];
-  if (filePath) {
-    return require("fs").readFileSync(filePath, "utf8");
-  }
-
-  if (process.env.NODE_ENV !== "production") {
-    const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
-      modulusLength: 2048,
-      publicKeyEncoding: { type: "spki", format: "pem" },
-      privateKeyEncoding: { type: "pkcs8", format: "pem" },
-    });
-    process.env.JWT_PRIVATE_KEY = privateKey;
-    process.env.JWT_PUBLIC_KEY = publicKey;
-    return name === "JWT_PRIVATE_KEY" ? privateKey : publicKey;
-  }
-
-  throw new Error(`Falta configurar ${name} o ${pathName}`);
+function parseCookies(cookieHeader) {
+  return String(cookieHeader || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const index = part.indexOf("=");
+      if (index === -1) return acc;
+      const key = part.slice(0, index).trim();
+      const value = decodeURIComponent(part.slice(index + 1).trim());
+      acc[key] = value;
+      return acc;
+    }, {});
 }
 
-const PRIVATE_KEY = getKey("JWT_PRIVATE_KEY", "JWT_PRIVATE_KEY_PATH");
-const PUBLIC_KEY = getKey("JWT_PUBLIC_KEY", "JWT_PUBLIC_KEY_PATH");
-
-function signAccessToken(payload = {}) {
-  const jti = crypto.randomUUID();
-  const subject = payload.sub || payload.userId;
-  const token = jwt.sign({ ...payload, sub: String(subject) }, PRIVATE_KEY, {
-    algorithm: "RS256",
-    expiresIn: ACCESS_EXP,
-    issuer: ISSUER,
-    audience: AUDIENCE,
-    jwtid: jti,
-  });
-  return { token, jti };
+function secureCookiesEnabled() {
+  return process.env.NODE_ENV === "production" || process.env.JWT_COOKIE_SECURE === "true";
 }
 
-function verifyAccessToken(token, extraOptions = {}) {
-  return jwt.verify(token, PUBLIC_KEY, {
-    algorithms: ["RS256"],
-    issuer: ISSUER,
-    audience: AUDIENCE,
-    ...extraOptions,
-  });
+function buildRefreshCookie(expiresAt) {
+  return {
+    httpOnly: true,
+    secure: secureCookiesEnabled(),
+    sameSite,
+    expires: expiresAt,
+    path: "/api/auth",
+  };
 }
 
-module.exports = { signAccessToken, verifyAccessToken };
+function clearRefreshCookie() {
+  return {
+    httpOnly: true,
+    secure: secureCookiesEnabled(),
+    sameSite,
+    expires: new Date(Date.now() - parseDuration("1h", 3600000)),
+    path: "/api/auth",
+  };
+}
+
+module.exports = { REFRESH_COOKIE_NAME, parseCookies, buildRefreshCookie, clearRefreshCookie };
