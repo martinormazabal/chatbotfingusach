@@ -1,70 +1,62 @@
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 const pool = require("../db");
 
-const WINDOW_MS = Number.parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || "900000", 10);
-const MAX_REQUESTS = Number.parseInt(process.env.AUTH_RATE_LIMIT_MAX || "10", 10);
-const MAX_FAILED_ATTEMPTS = Number.parseInt(process.env.AUTH_LOCK_MAX_ATTEMPTS || "5", 10);
-const LOCK_MINUTES = Number.parseInt(process.env.AUTH_LOCK_MINUTES || "15", 10);
-const buckets = new Map();
+const REFRESH_EXP = process.env.JWT_REFRESH_EXP || "30d";
+const SALT_ROUNDS = Number.parseInt(process.env.REFRESH_TOKEN_HASH_SALT_ROUNDS || "12", 10);
 
-function authAttemptLimiter(scope) {
-  return (req, res, next) => {
-    const key = `${scope}:${req.ip}`;
-    const now = Date.now();
-    const bucket = buckets.get(key) || { count: 0, resetAt: now + WINDOW_MS };
-    if (now > bucket.resetAt) {
-      bucket.count = 0;
-      bucket.resetAt = now + WINDOW_MS;
-    }
-    bucket.count += 1;
-    buckets.set(key, bucket);
-    if (bucket.count > MAX_REQUESTS) {
-      return res.status(429).json({ error: "Demasiados intentos, intenta nuevamente más tarde" });
-    }
-    return next();
-  };
+function parseDuration(value, fallbackMs) {
+  if (typeof value === "number") return value;
+  const match = String(value || "").trim().match(/^(\d+)([smhd])$/i);
+  if (!match) return fallbackMs;
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  const multipliers = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+  return amount * multipliers[unit];
 }
 
-function isAccountLocked(lockedUntil) {
-  return lockedUntil && new Date(lockedUntil) > new Date();
+function generateRefreshTokenPlain() {
+  return crypto.randomBytes(64).toString("hex");
 }
 
-async function registerFailedLogin(userId, email) {
-  if (!userId) return;
+async function storeRefreshToken(userId, plainToken, jti, deviceInfo = null) {
+  const hash = await bcrypt.hash(plainToken, SALT_ROUNDS);
+  const expiresAt = new Date(Date.now() + parseDuration(REFRESH_EXP, 30 * 24 * 60 * 60 * 1000));
   await pool.query(
-    `UPDATE users
-     SET failed_login_attempts = failed_login_attempts + 1,
-         locked_until = CASE
-           WHEN failed_login_attempts + 1 >= $2 THEN NOW() + ($3 * INTERVAL '1 minute')
-           ELSE locked_until
-         END
-     WHERE id = $1`,
-    [userId, MAX_FAILED_ATTEMPTS, LOCK_MINUTES]
+    `INSERT INTO refresh_tokens (user_id, token_hash, jti, device_info, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [userId, hash, jti, deviceInfo, expiresAt]
   );
+  return { expiresAt };
 }
 
-async function clearLoginAttempts(userId) {
-  await pool.query(
-    `UPDATE users
-     SET failed_login_attempts = 0,
-         locked_until = NULL,
-         last_login_at = NOW()
-     WHERE id = $1`,
+async function verifyAndRotateRefreshToken(userId, receivedToken) {
+  const { rows } = await pool.query(
+    `SELECT id, token_hash, jti, expires_at, revoked
+     FROM refresh_tokens
+     WHERE user_id = $1
+     ORDER BY issued_at DESC
+     LIMIT 10`,
     [userId]
   );
+
+  for (const row of rows) {
+    if (row.revoked || new Date(row.expires_at) < new Date()) continue;
+    const match = await bcrypt.compare(receivedToken, row.token_hash);
+    if (match) return { ok: true, jti: row.jti, dbId: row.id };
+  }
+
+  return { ok: false };
 }
 
-async function recordSecurityEvent({ userId = null, email = null, eventType, success, metadata = null, req }) {
-  await pool.query(
-    `INSERT INTO auth_security_logs (user_id, email, event_type, success, ip_address, user_agent, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [userId, email, eventType, success, req.ip, req.get("user-agent") || null, metadata]
-  );
+async function revokeRefreshTokenById(id) {
+  await pool.query(`UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1`, [id]);
 }
 
 module.exports = {
-  authAttemptLimiter,
-  clearLoginAttempts,
-  registerFailedLogin,
-  isAccountLocked,
-  recordSecurityEvent,
+  generateRefreshTokenPlain,
+  storeRefreshToken,
+  verifyAndRotateRefreshToken,
+  revokeRefreshTokenById,
+  parseDuration,
 };
