@@ -12,6 +12,7 @@
     pkgs.postgresql
     pkgs.postgresql_14
     pkgs.postgresql_16
+    pkgs.openssl.bin
   ];
 
   # Sets environment variables in the workspace
