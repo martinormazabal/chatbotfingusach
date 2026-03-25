@@ -16,10 +16,15 @@ export default function LoginPage() {
     e.preventDefault();
     try {
       const res = await axios.post('/api/login', { email, password });
-      localStorage.setItem('user', JSON.stringify(res.data?.user || res.data));
+      const sessionUser = {
+        ...(res.data?.user || {}),
+        accessToken: res.data?.accessToken || '',
+      };
+      localStorage.setItem('user', JSON.stringify(sessionUser));
+      setError('');
       router.push('/');
-    } catch {
-      setError('Correo o contraseña incorrectos');
+    } catch (error) {
+      setError(error?.response?.data?.error || 'Correo o contraseña incorrectos');
     }
   };
 

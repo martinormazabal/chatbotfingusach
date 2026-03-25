@@ -18,7 +18,7 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
 1. Clonar el repositorio:
 
    ```bash
-   git clone https://github.com/TU-USUARIO/chatbot-usach.git
+   git clone https://github.com/TU-USUARIO/chatbot-usach.git -b master
    cd chatbot-usach
    ```
 
@@ -39,6 +39,28 @@ Este proyecto implementa un prototipo de **ChatBot** para asesoría de estudiant
     EMAIL_FROM="Equipo Chatbot USACH <tu_cuenta@gmail.com>"
     PASSWORD_RESET_TOKEN_TTL_MINUTES=60
     ```
+
+### Configuración rápida de JWT para login
+
+1. Genera las claves RSA:
+
+```bash
+openssl genpkey -algorithm RSA -out jwt_private.pem -pkeyopt rsa_keygen_bits:2048
+openssl rsa -pubout -in jwt_private.pem -out jwt_public.pem
+```
+
+2. Convierte las claves a formato `.env` con el helper del backend:
+
+```bash
+cd backend
+npm run jwt:env -- ../jwt_private.pem ../jwt_public.pem
+```
+
+3. Copia una de las salidas en `backend/.env`. Puedes usar variables inline (`JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`), rutas (`JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH`) o Base64 (`JWT_PRIVATE_KEY_BASE64` / `JWT_PUBLIC_KEY_BASE64`).
+
+4. Reinicia backend y frontend. El admin raíz de demo se crea con el correo de `ROOT_ADMIN_EMAIL` y contraseña `admin`.
+
+Consulta la guía completa en `doc/jwt-login-setup.md`.
 
 ### Cómo obtener `GEMINI_API_KEY`
 

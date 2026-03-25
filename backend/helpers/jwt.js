@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 
@@ -5,15 +7,48 @@ const ISSUER = process.env.JWT_ISSUER || "chatbot-fing-usach";
 const AUDIENCE = process.env.JWT_AUDIENCE || "chatbot-clients";
 const ACCESS_EXP = process.env.JWT_ACCESS_EXP || "15m";
 
-function getKey(name, pathName) {
-  const inlineValue = process.env[name];
+function normalizeKeyValue(rawValue) {
+  if (!rawValue) return "";
+  const trimmed = String(rawValue).trim();
+  if (!trimmed) return "";
+
+  if (trimmed.includes("BEGIN ")) {
+    return trimmed.includes("\\n") ? trimmed.replace(/\\n/g, "\n") : trimmed;
+  }
+
+  try {
+    return Buffer.from(trimmed, "base64").toString("utf8");
+  } catch {
+    return trimmed;
+  }
+}
+
+function readKeyFromFile(filePath) {
+  const resolved = path.resolve(filePath);
+  return fs.readFileSync(resolved, "utf8");
+}
+
+function buildMissingKeyError(name, pathName, base64Name) {
+  return new Error(
+    `Falta configurar ${name}, ${pathName} o ${base64Name}. ` +
+      "Genera las claves RSA y cárgalas como texto PEM, Base64 o ruta a archivo."
+  );
+}
+
+function getKey(name, pathName, base64Name) {
+  const inlineValue = normalizeKeyValue(process.env[name]);
   if (inlineValue) {
-    return inlineValue.includes("\\n") ? inlineValue.replace(/\\n/g, "\n") : inlineValue;
+    return inlineValue;
+  }
+
+  const inlineBase64Value = normalizeKeyValue(process.env[base64Name]);
+  if (inlineBase64Value) {
+    return inlineBase64Value;
   }
 
   const filePath = process.env[pathName];
   if (filePath) {
-    return require("fs").readFileSync(filePath, "utf8");
+    return readKeyFromFile(filePath);
   }
 
   if (process.env.NODE_ENV !== "production") {
@@ -27,11 +62,11 @@ function getKey(name, pathName) {
     return name === "JWT_PRIVATE_KEY" ? privateKey : publicKey;
   }
 
-  throw new Error(`Falta configurar ${name} o ${pathName}`);
+  throw buildMissingKeyError(name, pathName, base64Name);
 }
 
-const PRIVATE_KEY = getKey("JWT_PRIVATE_KEY", "JWT_PRIVATE_KEY_PATH");
-const PUBLIC_KEY = getKey("JWT_PUBLIC_KEY", "JWT_PUBLIC_KEY_PATH");
+const PRIVATE_KEY = getKey("JWT_PRIVATE_KEY", "JWT_PRIVATE_KEY_PATH", "JWT_PRIVATE_KEY_BASE64");
+const PUBLIC_KEY = getKey("JWT_PUBLIC_KEY", "JWT_PUBLIC_KEY_PATH", "JWT_PUBLIC_KEY_BASE64");
 
 function signAccessToken(payload = {}) {
   const jti = crypto.randomUUID();
