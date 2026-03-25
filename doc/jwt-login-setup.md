@@ -103,8 +103,31 @@ Verifica, en este orden:
 4. Que no estés copiando mal las claves PEM dentro de `.env`.
 5. Que el usuario no haya quedado bloqueado temporalmente por intentos fallidos; en ese caso espera el tiempo definido por `AUTH_LOCK_MINUTES`.
 
-## 8. Qué cambió en el proyecto
-
-- El backend acepta claves JWT por **PEM inline**, **ruta a archivo** o **Base64**.
-- Se agregó un helper para generar automáticamente valores listos para `.env`.
 - El login del frontend ahora guarda también el `accessToken` y muestra el error exacto devuelto por backend, facilitando el diagnóstico.
+
+## 9. Pruebas de uso JWT para memoria (login + cambio de rol)
+
+Para levantar evidencia objetiva del uso de JWT Security en el login y en el cambio de rol, se agregó el script:
+
+```bash
+cd backend
+npm run test:jwt-security
+```
+
+El script ejecuta esta secuencia automáticamente:
+
+1. Login como admin por `/api/auth/login` y validación de `accessToken`.
+2. Intento de cambio de rol sin token (`401` esperado).
+3. Cambio de rol del mismo usuario con token admin (`200` esperado).
+4. Login del usuario temporal y validación de token.
+5. Intento del mismo usuario de elevar su propio rol (`403` esperado).
+
+Variables opcionales para personalizar la prueba:
+
+```env
+BACKEND_BASE_URL=http://localhost:5000
+JWT_TEST_ADMIN_EMAIL=admin@usach.cl
+JWT_TEST_ADMIN_PASSWORD=admin
+```
+
+Salida: un JSON con `checks[]`, `statusCode` y `ok` por cada prueba, útil para pegar en la memoria como evidencia técnica reproducible.

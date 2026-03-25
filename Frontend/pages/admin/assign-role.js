@@ -31,6 +31,7 @@ export default function AssignRolePage() {
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [currentUserRole, setCurrentUserRole] = useState("");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [accessToken, setAccessToken] = useState("");
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -44,9 +45,11 @@ export default function AssignRolePage() {
       const parsedUser = JSON.parse(rawUser);
       const role = (parsedUser?.role || parsedUser?.user?.role || '').toLowerCase();
       const email = (parsedUser?.email || parsedUser?.user?.email || '').toLowerCase();
+      const token = parsedUser?.accessToken || '';
       const allowed = role === 'funcionario' || role === 'admin' || isRootAdminEmail(email);
       setCurrentUserRole(role);
       setCurrentUserEmail(email);
+      setAccessToken(token);
       setIsAuthorized(allowed);
       if (!allowed) {
         setMessage('No tienes permisos para asignar roles.');
@@ -66,6 +69,7 @@ export default function AssignRolePage() {
       try {
         const res = await fetch("/api/users", {
           headers: {
+            Authorization: accessToken ? `Bearer ${accessToken}` : '',
             'x-user-role': currentUserRole,
             'x-user-email': currentUserEmail,
           },
@@ -83,7 +87,7 @@ export default function AssignRolePage() {
       }
     }
     fetchUsers();
-  }, [currentUserEmail, currentUserRole, isAuthorized]);
+  }, [accessToken, currentUserEmail, currentUserRole, isAuthorized]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -101,6 +105,7 @@ export default function AssignRolePage() {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : '',
           'x-user-role': currentUserRole,
           'x-user-email': currentUserEmail,
         },
@@ -140,6 +145,7 @@ export default function AssignRolePage() {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : '',
           'x-user-role': currentUserRole,
           'x-user-email': currentUserEmail,
         },

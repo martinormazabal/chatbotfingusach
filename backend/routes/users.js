@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const pool = require("../db");
 const nodemailer = require("nodemailer");
+const requireAuth = require("../middleware/auth");
 require("dotenv").config();
 
 const router = express.Router();
@@ -160,6 +161,13 @@ function sanitizeRole(role) {
     );
   }
   return normalized;
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ message: "Acceso denegado: requiere rol admin" });
+  }
+  return next();
 }
 
 async function getUserByEmail(email, client) {
@@ -340,8 +348,8 @@ Administración.`,
 }
 
 // Ruta para actualizar el perfil de un usuario (PUT o POST)
-router.put("/:id(\d+)/role", updateUserRole);
-router.post("/:id(\d+)/role", updateUserRole);
+router.put("/:id(\d+)/role", requireAuth, requireAdmin, updateUserRole);
+router.post("/:id(\d+)/role", requireAuth, requireAdmin, updateUserRole);
 
 // Acepta IDs no numéricos (por ejemplo, strings de consulta que lleguen con
 // caracteres) y devuelve mensajes JSON coherentes en lugar de HTML 404.
@@ -349,7 +357,7 @@ router.all("/:id/role", (req, res) => {
   if (!ALLOWED_ROLE_METHODS.includes(req.method)) {
     return res.status(405).json({ message: "Método no permitido" });
   }
-  return updateUserRole(req, res);
+  return requireAuth(req, res, () => requireAdmin(req, res, () => updateUserRole(req, res)));
 });
 
 // Ruta para cambiar la contraseña de un usuario

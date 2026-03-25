@@ -11,7 +11,8 @@
     "db:stats:range": "STATS_START=2025-06-01 STATS_END=2025-07-01 node scripts/computeStats.js",
     "db:migrate": "node scripts/quickMigrate.js",
     "test:requests": "node scripts/smoke-requests-route.js",
-    "jwt:env": "node scripts/jwt-env-helper.js"
+    "jwt:env": "node scripts/jwt-env-helper.js",
+    "test:jwt-security": "node scripts/jwt-security-analysis.js"
   },
   "keywords": [],
   "author": "",
