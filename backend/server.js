@@ -159,9 +159,10 @@ const initialize = async () => {
     });
 
     // Iniciar servidor
-    const PORT = process.env.BACKEND_PORT || 5000;
-    app.listen(PORT, () => {
-      console.log(`🚀 Backend en http://localhost:${PORT}`);
+    const PORT = process.env.PORT || process.env.BACKEND_PORT || 5000;
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Backend en http://0.0.0.0:${PORT}`);
     });
 
   } catch (error) {
