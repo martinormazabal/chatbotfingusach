@@ -185,6 +185,31 @@ rm -rf .pgdata
 initdb -D .pgdata -U postgres --auth=trust --encoding=UTF8 --locale=C
 pg_ctl -D .pgdata -l .pgdata/server.log start -w -o "-h 127.0.0.1 -p 5432 -k $(pwd)/.pgdata"
 ```
+## ☁️ Despliegue separado (Vercel + Render + Supabase)
+
+Si desplegarás frontend y backend por separado, **no debes iniciar PostgreSQL local** (`pg-up.sh`, `initdb`, `pg_ctl`) en Render.
+Esos scripts son solo para entorno local/Firebase Studio.
+
+### Frontend en Vercel
+
+- Root Directory: `Frontend`
+- Build/Install/Output: por defecto
+- Variables de entorno:
+  - `NEXT_PUBLIC_BACKEND_URL=https://<tu-backend-render>.onrender.com`
+  - `NEXT_PUBLIC_ROOT_ADMIN_EMAIL=admin@usach.cl`
+
+### Backend en Render
+
+- Root Directory: `backend`
+- Build Command: `npm install`
+- Start Command: `node server.js`
+- Health Check Path: `/api/healthz`
+- Variables de entorno:
+  - `DATABASE_URL=<connection string de Supabase>`
+  - `FRONTEND_URL=https://<tu-frontend-vercel>.vercel.app`
+  - `DB_SSL=true` (recomendado para conexiones externas administradas)
+
+Con `DATABASE_URL` configurada, el backend omite automáticamente el arranque local con `database/pg-up.sh`.
 
 ## ▶️ Ejecución
 
