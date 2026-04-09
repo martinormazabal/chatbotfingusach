@@ -7,13 +7,28 @@ function isTruthy(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 }
 
+function hasUsableDatabaseUrl() {
+  const value = String(process.env.DATABASE_URL || "").trim();
+  return Boolean(value) && !value.includes("@HOST:");
+}
+
 function shouldUseExternalDatabase() {
-  return Boolean(process.env.DATABASE_URL) || isTruthy(process.env.SKIP_LOCAL_POSTGRES);
+  if (isTruthy(process.env.SKIP_LOCAL_POSTGRES)) return true;
+  if (hasUsableDatabaseUrl()) return true;
+
+  // En producción (Render), jamás intentamos levantar PostgreSQL local.
+  if (process.env.NODE_ENV === "production") return true;
+
+  return false;
 }
 
 function ensurePostgresRunning() {
   if (shouldUseExternalDatabase()) {
-    console.log("ℹ️ DB externa detectada (DATABASE_URL/SKIP_LOCAL_POSTGRES). Se omite pg-up.sh.");
+    if (process.env.NODE_ENV === "production" && !hasUsableDatabaseUrl()) {
+      throw new Error("Falta DATABASE_URL válida en producción (Render). Configura la cadena real de Supabase.");
+    }
+
+    console.log("ℹ️ DB externa detectada (DATABASE_URL/SKIP_LOCAL_POSTGRES/producción). Se omite pg-up.sh.");
     return { host: process.env.DB_HOST || "remote", port: Number(process.env.DB_PORT || 5432), external: true };
   }
   const cwd = __dirname; // carpeta database
@@ -40,4 +55,4 @@ function ensurePostgresRunning() {
   return { host: "localhost", port: Number(port), external: false };
 }
 
-module.exports = { ensurePostgresRunning, shouldUseExternalDatabase };
+module.exports = { ensurePostgresRunning, shouldUseExternalDatabase, hasUsableDatabaseUrl };

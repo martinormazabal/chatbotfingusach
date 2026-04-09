@@ -27,32 +27,12 @@ const parseOrigins = (value = "") =>
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-const parseBytes = (value) => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string") return null;
-
-  const numeric = parseFloat(value);
-  if (!Number.isFinite(numeric)) return null;
-
-  const lower = value.trim().toLowerCase();
-  if (lower.endsWith("kb")) return Math.floor(numeric * 1024);
-  if (lower.endsWith("mb")) return Math.floor(numeric * 1024 * 1024);
-  if (lower.endsWith("gb")) return Math.floor(numeric * 1024 * 1024 * 1024);
-
-  return Math.floor(numeric);
-};
-
 const backendOrigin =
   sanitizeBaseUrl(process.env.NEXT_PUBLIC_BACKEND_URL) ||
   sanitizeBaseUrl(process.env.BACKEND_URL) ||
   `http://localhost:${process.env.BACKEND_PORT || 5000}`;
 
 muteKnownWarnings();
-
-// Límite máximo permitido por el servidor de desarrollo de Next.js antes de reenviar la petición al backend.
-// Previene el error "Request body exceeded 10MB" al subir PDFs grandes vía proxy.
-const middlewareClientMaxBodySize =
-  parseBytes(process.env.NEXT_MIDDLEWARE_MAX_BODY_SIZE) || 50 * 1024 * 1024;
 
 const allowedDevOrigins = (() => {
   const origins = new Set(parseOrigins(process.env.NEXT_ALLOWED_DEV_ORIGINS));
@@ -77,11 +57,6 @@ const allowedDevOrigins = (() => {
 })();
 
 module.exports = {
-  // Evita la advertencia de múltiples lockfiles seleccionando el raíz explícitamente
-  turbopack: {
-    root: __dirname,
-  },
-  middlewareClientMaxBodySize,
   async rewrites() {
     return process.env.NODE_ENV === "development"
       ? [
@@ -113,6 +88,4 @@ module.exports = {
       allowedOrigins: allowedDevOrigins,
     },
   },
-  // Permite importar módulos que residen fuera del directorio Frontend (por ejemplo, "backend/db.js").
-  externalDir: true,
 };

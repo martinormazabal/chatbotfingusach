@@ -8,12 +8,19 @@ function isTruthy(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 }
 
-const usingDatabaseUrl = Boolean(process.env.DATABASE_URL);
+const rawDatabaseUrl = String(process.env.DATABASE_URL || "").trim();
+const usingDatabaseUrl = Boolean(rawDatabaseUrl);
+
+if (usingDatabaseUrl && rawDatabaseUrl.includes("@HOST:")) {
+  throw new Error(
+    "DATABASE_URL contiene host placeholder (HOST). Reemplázala con la URL real de Supabase para Render."
+  );
+}
 const forceSSL = isTruthy(process.env.DB_SSL);
 
 const pool = usingDatabaseUrl
   ? new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: rawDatabaseUrl,
       ssl: forceSSL ? { rejectUnauthorized: false } : undefined,
     })
   : new Pool({

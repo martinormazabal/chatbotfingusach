@@ -193,7 +193,9 @@ Esos scripts son solo para entorno local/Firebase Studio.
 ### Frontend en Vercel
 
 - Root Directory: `Frontend`
-- Build/Install/Output: por defecto
+- Build Command: `npm run build` (ejecuta solo `next build`)
+- Start Command: `npm run start` (ejecuta `next start`)
+- **No configurar `NODE_ENV` manualmente** en Vercel. Vercel lo define automáticamente (`production` en deploy).
 - Variables de entorno:
   - `NEXT_PUBLIC_BACKEND_URL=https://<tu-backend-render>.onrender.com`
   - `NEXT_PUBLIC_ROOT_ADMIN_EMAIL=admin@usach.cl`
@@ -205,11 +207,13 @@ Esos scripts son solo para entorno local/Firebase Studio.
 - Start Command: `node server.js`
 - Health Check Path: `/api/healthz`
 - Variables de entorno:
-  - `DATABASE_URL=<connection string de Supabase>`
+  - `DATABASE_URL=postgresql://...` (**cadena real de Supabase**, no placeholders como `HOST`)
   - `FRONTEND_URL=https://<tu-frontend-vercel>.vercel.app`
   - `DB_SSL=true` (recomendado para conexiones externas administradas)
 
-Con `DATABASE_URL` configurada, el backend omite automáticamente el arranque local con `database/pg-up.sh`.
+Con `DATABASE_URL` configurada, el backend omite automáticamente el arranque local con `database/pg-up.sh`. En `NODE_ENV=production`, si `DATABASE_URL` no es válida, el backend falla temprano para evitar intentar PostgreSQL local.
+
+> Nota: una URL como `192.168.x.x:3000` es una IP privada de red local y no sirve como endpoint público en Render/Vercel. Usa siempre los dominios públicos `*.onrender.com` y `*.vercel.app` (o tu dominio propio).
 
 ## ▶️ Ejecución
 

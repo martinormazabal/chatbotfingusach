@@ -7,8 +7,8 @@
     "backend": "cd ../backend && npm run dev",
     "frontend": "cd ../frontend && next dev",
     "setup": "cd ../database && node setupDatabase.js",
-    "start": "npx --yes concurrently \"next start\" \"node ../database/setupDatabase.js\"",
-    "build": "npx --yes concurrently \"next build\" \"sleep 5 && next dev\"",
+    "start": "next start",
+    "build": "next build",
     "nodemon": "nodemon ../backend/server.js",
     "test": "jest"
   },
