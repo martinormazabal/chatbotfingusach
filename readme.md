@@ -207,11 +207,21 @@ Esos scripts son solo para entorno local/Firebase Studio.
 - Start Command: `node server.js`
 - Health Check Path: `/api/healthz`
 - Variables de entorno:
-  - `DATABASE_URL=postgresql://...` (**cadena real de Supabase**, no placeholders como `HOST`)
+  - `DATABASE_URL=postgres://postgres.<project_ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres` (**usar Session pooler de Supabase; evita el host directo IPv6**)
   - `FRONTEND_URL=https://<tu-frontend-vercel>.vercel.app`
   - `DB_SSL=true` (recomendado para conexiones externas administradas)
 
 Con `DATABASE_URL` configurada, el backend omite automáticamente el arranque local con `database/pg-up.sh`. En `NODE_ENV=production`, si `DATABASE_URL` no es válida, el backend falla temprano para evitar intentar PostgreSQL local.
+
+> Importante: no uses la conexión "directa" del proyecto Supabase en Render cuando tengas errores `ENETUNREACH` por IPv6. En ese caso, usa la cadena de **Session pooler** que aparece en el panel `Connect` de Supabase.
+
+### Cargar esquema y datos en Supabase
+
+Las tablas locales (`database/.pgdata`) **no se migran solas** al despliegue.
+
+1. Abre el SQL Editor de Supabase.
+2. Copia y ejecuta el contenido de `database/init.sql`.
+3. Inserta manualmente tus datos semilla (o ejecútalos con scripts SQL equivalentes).
 
 > Nota: una URL como `192.168.x.x:3000` es una IP privada de red local y no sirve como endpoint público en Render/Vercel. Usa siempre los dominios públicos `*.onrender.com` y `*.vercel.app` (o tu dominio propio).
 
