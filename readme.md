@@ -219,9 +219,9 @@ Con `DATABASE_URL` configurada, el backend omite automáticamente el arranque lo
 
 Las tablas locales (`database/.pgdata`) **no se migran solas** al despliegue.
 
-1. Abre el SQL Editor de Supabase.
-2. Copia y ejecuta el contenido de `database/init.sql`.
-3. Inserta manualmente tus datos semilla (o ejecútalos con scripts SQL equivalentes).
+1. Abre el SQL Editor de Supabase (o ejecuta una migración controlada en tu pipeline).
+2. Copia y ejecuta el contenido de `database/supabase-init.sql` (extensiones, tablas, índices y semilla admin).
+3. Usa `database/init.sql` solo para instalación local/Firebase Studio.
 
 > Nota: una URL como `192.168.x.x:3000` es una IP privada de red local y no sirve como endpoint público en Render/Vercel. Usa siempre los dominios públicos `*.onrender.com` y `*.vercel.app` (o tu dominio propio).
 

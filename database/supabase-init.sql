@@ -1,3 +1,4 @@
+-- Script para ejecutar manualmente en Supabase SQL Editor o migración controlada
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

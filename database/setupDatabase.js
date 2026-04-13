@@ -2,40 +2,53 @@
 require("dotenv").config();
 const fs = require("fs");
 const { Pool } = require("pg");
-const path = require('path');
-const { ensurePostgresRunning } = require("./postgresManager");
+const path = require("path");
 
-const { host: runtimeHost, port: runtimePort } = ensurePostgresRunning();
+
+const isRender = Boolean(String(process.env.RENDER || "").trim());
+const isProduction = process.env.NODE_ENV === "production";
+const hasDatabaseUrl = Boolean(String(process.env.DATABASE_URL || "").trim());
+
+if (hasDatabaseUrl && (isProduction || isRender)) {
+  console.log("ℹ️ DATABASE_URL detectada en producción/Render. Se omite setup local.");
+  process.exit(0);
+}
+
+let runtimeHost;
+let runtimePort;
+
+if (!hasDatabaseUrl) {
+  const { ensurePostgresRunning } = require("./postgresManager");
+  const runtime = ensurePostgresRunning();
+  runtimeHost = runtime.host;
+  runtimePort = runtime.port;
+}
+
 // Verificar y depurar la configuración del Pool
-console.log('Pool config:', {
+console.log("Pool config:", {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   host: process.env.DB_HOST,
   port: process.env.DB_PORT,
-  database: process.env.DB_NAME
+  database: process.env.DB_NAME,
 });
 const dbUser = process.env.DB_USER || "chatbotuser";
 const dbPassword = process.env.DB_PASSWORD || "cp1619comm2k1";
 const dbHost = process.env.DB_HOST || runtimeHost || "localhost";
-const dbPort = Number(runtimePort || process.env.DB_PORT || runtimePort);
+const dbPort = Number(runtimePort || process.env.DB_PORT || runtimePort || 5432);
 const dbName = process.env.DB_NAME || "chatbotdb";
 const adminPassword = process.env.DB_ADMIN_PASSWORD || "";
 const adminDatabase = process.env.DB_ADMIN_DB || "postgres";
 const adminUserCandidates = [
   process.env.DB_ADMIN_USER,
   process.env.PGUSER,
-  'postgres',
+  "postgres",
   process.env.USER,
   process.env.LOGNAME,
 ].filter(Boolean);
 
 const isSafeIdentifier = (identifier) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier);
 const escapeLiteral = (value) => String(value).replace(/'/g, "''");
-
-if (process.env.DATABASE_URL) {
-  console.log("Base externa detectada. Se omite setup local.");
-  process.exit(0);
-}
 
 if (![dbUser, dbName].every(isSafeIdentifier)) {
   throw new Error("Invalid database identifier. Use alphanumeric characters and underscores only.");
@@ -104,12 +117,11 @@ const resolveAdminPool = async () => {
 
 // Ejecutar init.sql
 const initFilePath = path.resolve(__dirname, "init.sql");
-const rootAdminEmail = (process.env.ROOT_ADMIN_EMAIL || 'admin@usach.cl').toLowerCase();
+const rootAdminEmail = (process.env.ROOT_ADMIN_EMAIL || "admin@usach.cl").toLowerCase();
 
 const ensureRoleAndDatabase = async (adminPool) => {
   const roleNameLiteral = escapeLiteral(dbUser);
   const rolePasswordLiteral = escapeLiteral(dbPassword);
-  const databaseNameLiteral = escapeLiteral(dbName);
 
   await adminPool.query(`
     DO $$
@@ -126,33 +138,10 @@ const ensureRoleAndDatabase = async (adminPool) => {
     END $$;
   `);
 
-  const dbExists = await adminPool.query(
-    "SELECT 1 FROM pg_database WHERE datname = $1",
-    [dbName]
-  );
+  const dbExists = await adminPool.query("SELECT 1 FROM pg_database WHERE datname = $1", [dbName]);
 
   if (dbExists.rowCount === 0) {
     await adminPool.query(`CREATE DATABASE "${dbName}" OWNER "${dbUser}"`);
-  }
-};
-
-const verifyDatabaseState = async (adminPool, userPool) => {
-  const dbExists = await adminPool.query(
-    "SELECT 1 FROM pg_database WHERE datname = $1",
-    [dbName]
-  );
-
-  if (dbExists.rowCount === 0) {
-    throw new Error(`No se encontró la base de datos ${dbName}.`);
-  }
-
-  const tableCheck = await userPool.query(
-    "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1",
-    ["users"]
-  );
-
-  if (tableCheck.rowCount === 0) {
-    throw new Error("La tabla requerida 'users' no existe en la base de datos.");
   }
 };
 
@@ -170,7 +159,6 @@ const setup = async () => {
     const adminReady = await waitForDatabase(adminPool);
     if (!adminReady.ready) {
       await adminPool.end();
-      await verifyDatabaseState(adminPool, pool);
       process.exit(1);
     }
 
@@ -181,7 +169,7 @@ const setup = async () => {
       password: dbPassword,
       host: dbHost,
       port: dbPort,
-      database: dbName
+      database: dbName,
     });
 
     const dbReady = await waitForDatabase(pool);

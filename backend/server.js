@@ -12,7 +12,6 @@ const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const removeMd = require('remove-markdown');
-const { ensurePostgresRunning } = require("../database/postgresManager");
 const CITATION_REGEX = /:contentReference\[\w+:\d+\]\{index=\d+\}/g;
 const INIT_RETRY_DELAY_MS = 5000;
 const DB_CONNECT_TIMEOUT_MS = Number(process.env.DB_CONNECT_TIMEOUT_MS || 12000);
@@ -85,11 +84,6 @@ const initializeDatabase = async () => {
 };
 
 const initialize = () => {
-  try {
-    ensurePostgresRunning();
-  } catch (error) {
-    console.error("⚠️ No fue posible preparar PostgreSQL local/externa:", error?.message || error);
-  }
 
   const app = express();
 
