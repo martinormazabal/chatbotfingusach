@@ -32,6 +32,11 @@ const adminUserCandidates = [
 const isSafeIdentifier = (identifier) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier);
 const escapeLiteral = (value) => String(value).replace(/'/g, "''");
 
+if (process.env.DATABASE_URL) {
+  console.log("Base externa detectada. Se omite setup local.");
+  process.exit(0);
+}
+
 if (![dbUser, dbName].every(isSafeIdentifier)) {
   throw new Error("Invalid database identifier. Use alphanumeric characters and underscores only.");
 }
