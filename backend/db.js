@@ -20,7 +20,7 @@ const forceSSL = isTruthy(process.env.DB_SSL);
 
 const pool = usingDatabaseUrl
   ? new Pool({
-      connectionString: rawDatabaseUrl,
+      connectionString: process.env.DATABASE_URL || rawDatabaseUrl,
       ssl: forceSSL ? { rejectUnauthorized: false } : undefined,
     })
   : new Pool({

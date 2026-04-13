@@ -84,7 +84,11 @@ const initializeDatabase = async () => {
 };
 
 const initialize = () => {
-
+  if (!process.env.DATABASE_URL) {
+    ensurePostgresRunning();
+  } else {
+    console.log("🌐 Usando base de datos externa (Supabase)");
+  }
   const app = express();
 
   // Descripción: Entrega un estado resumido del backend para monitoreo y debugging rápido.
