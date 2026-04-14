@@ -215,6 +215,21 @@ Con `DATABASE_URL` configurada, el backend omite automáticamente el arranque lo
 
 > Importante: no uses la conexión "directa" del proyecto Supabase en Render cuando tengas errores `ENETUNREACH` por IPv6. En ese caso, usa la cadena de **Session pooler** que aparece en el panel `Connect` de Supabase.
 
+#### Error `Tenant or user not found` (Supavisor)
+
+Si el backend ya llega a Supavisor pero responde `Tenant or user not found`, normalmente la `DATABASE_URL` está mal formada.
+
+Checklist exacto para Render:
+
+1. Formato exacto (session mode):  
+   `postgres://postgres.<project_ref>:<DB_PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+2. Usuario: `postgres.<project_ref>` (no `postgres` solo).
+3. Host: `aws-0-<region>.pooler.supabase.com`.
+4. Puerto: `5432`.
+5. Password: usar la **Database password real** del proyecto Supabase (no API key, no placeholder).
+6. Guardar variable en Render y hacer **Manual Deploy / Clear build cache and deploy**.
+7. No reaplicar `database/supabase-init.sql` si las tablas ya existen
+
 ### Cargar esquema y datos en Supabase
 
 Las tablas locales (`database/.pgdata`) **no se migran solas** al despliegue.
