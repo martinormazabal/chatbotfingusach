@@ -1,13 +1,39 @@
 const { Pool } = require("pg");
 
+function safeDecodeURIComponent(value) {
+  try {
+    return { value: decodeURIComponent(value), failed: false };
+  } catch (_error) {
+    return { value, failed: true };
+  }
+}
+
+function hasUnencodedReservedChars(value) {
+  // RFC3986 reserved chars that must be percent-encoded in userinfo when literal.
+  return /[\/?#\[\]@]/.test(value);
+}
+
 function validateSupavisorSessionUrl(connectionString) {
   const errors = [];
 
+  if (typeof connectionString !== "string" || connectionString.trim().length === 0) {
+    return ["DATABASE_URL está vacía o no es un string."];
+  }
+
+  const rawValue = connectionString.trim();
+
   let parsed;
   try {
-    parsed = new URL(connectionString);
+    parsed = new URL(rawValue);
   } catch (error) {
-    return ["DATABASE_URL no es una URL válida."];
+    const malformedHints = [];
+    if (rawValue.includes("[") || rawValue.includes("]")) {
+      malformedHints.push(
+        "Se detectaron corchetes en DATABASE_URL; reemplaza [YOUR-PASSWORD] por la contraseña real.",
+      );
+    }
+    malformedHints.push("Si la contraseña tiene caracteres especiales, usa URL encoding.");
+    return ["DATABASE_URL no es una URL válida.", ...malformedHints];
   }
 
   if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
@@ -24,13 +50,35 @@ function validateSupavisorSessionUrl(connectionString) {
     errors.push("El puerto debe ser 5432 para Supavisor session mode.");
   }
 
-  const username = decodeURIComponent(parsed.username || "");
+  const decodedUsername = safeDecodeURIComponent(parsed.username || "");
+  if (decodedUsername.failed) {
+    errors.push("El usuario contiene un encoding inválido. Usa URL encoding válido.");
+  }
+  const username = decodedUsername.value;
   if (!/^postgres\.[a-z0-9]+$/i.test(username)) {
     errors.push("El usuario debe ser postgres.<project_ref> (no solo postgres).");
   }
 
-  const password = decodeURIComponent(parsed.password || "");
-  const invalidPlaceholders = new Set(["<password>", "password", "changeme", "your_password"]);
+  const rawPassword = parsed.password || "";
+  const decodedPassword = safeDecodeURIComponent(rawPassword);
+  if (decodedPassword.failed) {
+    errors.push("La contraseña tiene URL encoding inválido. Revisa caracteres especiales y vuelve a codificar.");
+  }
+
+  if (hasUnencodedReservedChars(rawPassword)) {
+    errors.push("La contraseña contiene caracteres reservados sin codificar. Debes aplicar URL encoding.");
+  }
+
+  const password = decodedPassword.value;
+  const invalidPlaceholders = new Set([
+    "<password>",
+    "<your-password>",
+    "password",
+    "changeme",
+    "your_password",
+    "[your-password]",
+    "[your_password]",
+  ]);
   if (!password || invalidPlaceholders.has(password.toLowerCase())) {
     errors.push("La contraseña debe ser la Database Password real de tu proyecto Supabase.");
   }

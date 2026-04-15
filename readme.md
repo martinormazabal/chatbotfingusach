@@ -207,7 +207,7 @@ Esos scripts son solo para entorno local/Firebase Studio.
 - Start Command: `node server.js`
 - Health Check Path: `/api/healthz`
 - Variables de entorno:
-  - `DATABASE_URL=postgres://postgres.<project_ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres` (**usar Session pooler de Supabase; evita el host directo IPv6**)
+  - `DATABASE_URL=postgres://postgres.<project_ref>:<DB_PASSWORD_URL_ENCODED>@aws-0-<region>.pooler.supabase.com:5432/postgres` (**usar Session pooler de Supabase; evita el host directo IPv6**)
   - `FRONTEND_URL=https://<tu-frontend-vercel>.vercel.app`
   - `DB_SSL=true` (recomendado para conexiones externas administradas)
 
@@ -227,6 +227,8 @@ Checklist exacto para Render:
 3. Host: `aws-0-<region>.pooler.supabase.com`.
 4. Puerto: `5432`.
 5. Password: usar la **Database password real** del proyecto Supabase (no API key, no placeholder).
+   - Si aún ves `[YOUR-PASSWORD]` o `<PASSWORD>`, reemplázalo por la contraseña real antes de guardar.
+   - Si la contraseña tiene caracteres especiales (`@`, `#`, `/`, `?`, `[`, `]`, etc.), aplicar **URL encoding**.
 6. Guardar variable en Render y hacer **Manual Deploy / Clear build cache and deploy**.
 7. No reaplicar `database/supabase-init.sql` si las tablas ya existen
 
