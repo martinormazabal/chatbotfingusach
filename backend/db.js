@@ -42,6 +42,7 @@ function validateSupavisorSessionUrl(connectionString) {
 
   if (!parsed.hostname.toLowerCase().endsWith(".pooler.supabase.com")) {
     errors.push("El host debe terminar en .pooler.supabase.com.");
+  }
 
   const port = parsed.port || "5432";
   if (port !== "5432") {
