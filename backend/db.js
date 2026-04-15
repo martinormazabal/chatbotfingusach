@@ -40,10 +40,8 @@ function validateSupavisorSessionUrl(connectionString) {
     errors.push("El protocolo debe ser postgres:// o postgresql://.");
   }
 
-  const expectedHostPattern = /^aws-0-[a-z0-9-]+\.pooler\.supabase\.com$/i;
-  if (!expectedHostPattern.test(parsed.hostname)) {
-    errors.push("El host debe tener formato aws-0-<region>.pooler.supabase.com.");
-  }
+  if (!parsed.hostname.toLowerCase().endsWith(".pooler.supabase.com")) {
+    errors.push("El host debe terminar en .pooler.supabase.com.");
 
   const port = parsed.port || "5432";
   if (port !== "5432") {
