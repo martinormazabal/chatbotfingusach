@@ -126,6 +126,7 @@ const initialize = () => {
       .filter(Boolean)
   );
   allowedOrigins.add("http://localhost:3000");
+  allowedOrigins.add("https://chatbotfingusach.vercel.app");
 
   // Descripción: Valida orígenes permitidos para CORS según listas configuradas y dominios seguros.
   // Entrada: origin (string) del encabezado de la petición y callback (Function) para responder la verificación.
@@ -146,7 +147,8 @@ const initialize = () => {
         if (
           hostname.endsWith("cloudworkstations.dev") ||
           hostname.endsWith("web.app") ||
-          hostname.endsWith("firebaseapp.com")
+          hostname.endsWith("firebaseapp.com") ||
+          hostname.endsWith("vercel.app")
         ) {
           return callback(null, true);
         }
@@ -170,6 +172,13 @@ const initialize = () => {
     next();
   });
   app.use(cors({ ...corsOptions, credentials: true }));
+  app.use((req, _res, next) => {
+    if (process.env.DEBUG_AUTH_HEADERS === 'true') {
+      console.log('Headers:', req.headers);
+      console.log('Authorization:', req.headers.authorization);
+    }
+    next();
+  });
   app.use('/uploads', express.static(uploadDir));
   app.use(express.json({ limit: "12mb" }));
   app.use(express.urlencoded({ extended: true, limit: "12mb" }));

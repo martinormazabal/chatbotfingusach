@@ -4,6 +4,14 @@ import Link from "next/link";
 import { isRootAdminEmail } from '../../lib/rbac';
 import styles from "./assignRole.module.css";
 
+async function parseJsonResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+  return { message: await response.text() };
+}
+
 async function parseJsonSafe(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -19,6 +27,31 @@ async function parseJsonSafe(response) {
   return { message: text || "Respuesta no válida del servidor" };
 }
 
+async function refreshSessionToken(currentToken) {
+  const refreshResponse = await fetch('/api/auth/refresh', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Authorization: currentToken ? `Bearer ${currentToken}` : '',
+    },
+  });
+
+  const payload = await parseJsonResponse(refreshResponse);
+  if (!refreshResponse.ok || !payload?.accessToken) {
+    throw new Error(payload?.error || payload?.message || 'No se pudo renovar la sesión.');
+  }
+
+  const rawUser = localStorage.getItem('user');
+  const parsed = rawUser ? JSON.parse(rawUser) : {};
+  const updated = {
+    ...parsed,
+    ...(payload.user || {}),
+    accessToken: payload.accessToken,
+  };
+  localStorage.setItem('user', JSON.stringify(updated));
+  return payload.accessToken;
+}
+
 export default function AssignRolePage() {
   const [users, setUsers] = useState([]);
   const [formData, setFormData] = useState({
@@ -32,6 +65,21 @@ export default function AssignRolePage() {
   const [currentUserRole, setCurrentUserRole] = useState("");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [accessToken, setAccessToken] = useState("");
+  const withAuthRetry = async (requestFactory) => {
+    const response = await requestFactory(accessToken);
+    if (response.status !== 401) {
+      return response;
+    }
+
+    try {
+      const freshToken = await refreshSessionToken(accessToken);
+      setAccessToken(freshToken);
+      return requestFactory(freshToken);
+    } catch (refreshError) {
+      setMessage(refreshError.message || 'Tu sesión expiró. Inicia sesión nuevamente.');
+      return response;
+    }
+  };
 
   useEffect(() => {
     const rawUser = localStorage.getItem('user');
@@ -67,13 +115,15 @@ export default function AssignRolePage() {
 
     async function fetchUsers() {
       try {
-        const res = await fetch("/api/users", {
-          headers: {
-            Authorization: accessToken ? `Bearer ${accessToken}` : '',
-            'x-user-role': currentUserRole,
-            'x-user-email': currentUserEmail,
-          },
-        });
+        const res = await withAuthRetry((token) =>
+          fetch('/api/users', {
+            headers: {
+              Authorization: token ? `Bearer ${token}` : '',
+              'x-user-role': currentUserRole,
+              'x-user-email': currentUserEmail,
+            },
+          })
+        );
         if (!res.ok) throw new Error(`Error ${res.status}`);
         const data = await parseJsonSafe(res);
         const sanitized = Array.isArray(data)
@@ -101,16 +151,18 @@ export default function AssignRolePage() {
     setIsLoading(true);
     setMessage("");
     try {
-      const res = await fetch(`/api/users/${formData.userId}/role`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: accessToken ? `Bearer ${accessToken}` : '',
-          'x-user-role': currentUserRole,
-          'x-user-email': currentUserEmail,
-        },
-        body: JSON.stringify({ role: formData.role }),
-      });
+      const res = await withAuthRetry((token) =>
+        fetch(`/api/users/${formData.userId}/role`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: token ? `Bearer ${token}` : '',
+            'x-user-role': currentUserRole,
+            'x-user-email': currentUserEmail,
+          },
+          body: JSON.stringify({ role: formData.role }),
+        })
+      );
       const data = await parseJsonSafe(res);
       if (res.ok) {
         setMessage("Rol actualizado exitosamente.");
@@ -141,16 +193,18 @@ export default function AssignRolePage() {
     if (!isAuthorized) return setMessage("No tienes permisos para eliminar usuarios.");
     if (!confirm("¿Eliminar seleccionados?")) return;
     try {
-      const res = await fetch("/api/users", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: accessToken ? `Bearer ${accessToken}` : '',
-          'x-user-role': currentUserRole,
-          'x-user-email': currentUserEmail,
-        },
-        body: JSON.stringify({ ids: selectedUsers }),
-      });
+      const res = await withAuthRetry((token) =>
+        fetch('/api/users', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: token ? `Bearer ${token}` : '',
+            'x-user-role': currentUserRole,
+            'x-user-email': currentUserEmail,
+          },
+          body: JSON.stringify({ ids: selectedUsers }),
+        })
+      );
       const data = await parseJsonSafe(res);
       if (res.ok) {
         setMessage(data.message);

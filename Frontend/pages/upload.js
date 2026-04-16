@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import styles from './upload.module.css';
+import { sanitizeBaseUrl } from '@/lib/backend-url';
 
 export default function DocumentUpload() {
   const [file, setFile] = useState(null);
@@ -12,13 +13,7 @@ export default function DocumentUpload() {
   const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
 
   const uploadEndpoint = useMemo(() => {
-    // En producción podrías configurar un backend externo explícito,
-    // pero en desarrollo forzamos siempre el proxy de Next:
-    if (process.env.NODE_ENV === 'development') {
-      return '/api/documents/upload';
-    }
-  
-    const base = (process.env.NEXT_PUBLIC_BACKEND_URL || '').replace(/\/$/, '');
+    const base = sanitizeBaseUrl(process.env.NEXT_PUBLIC_BACKEND_URL || '');
     return base ? `${base}/api/documents/upload` : '/api/documents/upload';
   }, []);
 
@@ -52,6 +47,7 @@ export default function DocumentUpload() {
       const response = await fetch(uploadEndpoint, {
         method: 'POST',
         body: formData,
+        credentials: 'include',
         signal: controller.signal
       });
 
