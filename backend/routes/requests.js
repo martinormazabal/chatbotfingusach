@@ -258,6 +258,140 @@ async function retrieveFromCache(query = "") {
 
 const router = express.Router();
 
+// Descripción: Lista el historial de solicitudes filtrable por término de búsqueda y usuario autenticado.
+// Entrada: req (Request) con query opcional `search` y JWT Bearer opcional para filtrar por user_id.
+// Salida: JSON con solicitudes normalizadas para la interfaz de historial.
+// Procesos:
+// 1. Leer el término de búsqueda y detectar usuario desde Authorization cuando exista.
+// 2. Construir consulta SQL con filtros seguros por user_id y texto.
+// 3. Retornar resultados ordenados por fecha o error con logging detallado.
+
+router.get('/', async (req, res) => {
+  const search = String(req.query.search || '').trim();
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+
+  let userId = null;
+  if (token) {
+    try {
+      const { verifyAccessToken } = require('../helpers/jwt');
+      const payload = verifyAccessToken(token);
+      userId = Number(payload?.sub || payload?.userId || payload?.id) || null;
+    } catch (error) {
+      console.error(error);
+      return res.status(401).json({ error: 'Token inválido o expirado' });
+    }
+  }
+
+  try {
+    const params = [];
+    const where = [];
+
+    if (userId) {
+      params.push(userId);
+      where.push(`r.user_id = $${params.length}`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      where.push(`(r.query ILIKE $${params.length} OR r.response ILIKE $${params.length})`);
+    }
+
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const result = await pool.query(
+      `SELECT r.id,
+              COALESCE(r.query, 'Solicitud') AS name,
+              COALESCE(left(r.response, 280), '') AS description,
+              r.context,
+              r.user_id,
+              r.created_at,
+              r.model,
+              u.email AS user_email
+       FROM requests r
+       LEFT JOIN users u ON u.id = r.user_id
+       ${whereClause}
+       ORDER BY r.created_at DESC
+       LIMIT 200`,
+      params
+    );
+
+    return res.json(
+      result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        context: row.context || '',
+        user_id: row.user_id,
+        user_email: row.user_email || null,
+        created_at: row.created_at,
+        model: row.model || null,
+      }))
+    );
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'No fue posible recuperar la solicitud' });
+  }
+});
+
+// Descripción: Recupera el detalle de una solicitud específica por ID.
+// Entrada: req (Request) con parámetro :id.
+// Salida: JSON con campos de detalle o estado 404/500.
+
+router.get('/:id(\d+)', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT r.id,
+              COALESCE(r.query, 'Solicitud') AS name,
+              COALESCE(r.response, '') AS description,
+              COALESCE(r.context, '') AS context,
+              r.user_id,
+              r.created_at,
+              r.model,
+              u.email AS user_email
+       FROM requests r
+       LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.id = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Solicitud no encontrada' });
+    }
+
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'No fue posible recuperar la solicitud' });
+  }
+});
+
+// Descripción: Devuelve los pasos de una solicitud en formato texto a partir del contexto almacenado.
+// Entrada: req (Request) con parámetro :id de la solicitud.
+// Salida: JSON con cadena steps utilizable por la interfaz.
+
+router.get('/:id(\d+)/steps', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('SELECT context FROM requests WHERE id = $1 LIMIT 1', [id]);
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Solicitud no encontrada' });
+    }
+
+    const rawContext = String(result.rows[0].context || '').trim();
+    const steps = rawContext
+      ? rawContext.split(/\s*\|\s*/).filter(Boolean).map((step, index) => `${index + 1}. ${step}`).join('\n')
+      : 'Sin pasos registrados para esta solicitud.';
+
+    return res.json({ steps });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'No fue posible recuperar la solicitud' });
+  }
+});
+
 // --- INICIO: LÓGICA DE GEMINI REFORZADA ---
 
 // 3.1) Crea el cliente SOLO si hay API key

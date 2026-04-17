@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const ISSUER = process.env.JWT_ISSUER || "chatbot-fing-usach";
 const AUDIENCE = process.env.JWT_AUDIENCE || "chatbot-clients";
 const ACCESS_EXP = process.env.JWT_ACCESS_EXP || "15m";
+const SHARED_SECRET = process.env.JWT_SECRET ? String(process.env.JWT_SECRET).trim() : "";
 
 function normalizeKeyValue(rawValue) {
   if (!rawValue) return "";
@@ -65,28 +66,43 @@ function getKey(name, pathName, base64Name) {
   throw buildMissingKeyError(name, pathName, base64Name);
 }
 
-const PRIVATE_KEY = getKey("JWT_PRIVATE_KEY", "JWT_PRIVATE_KEY_PATH", "JWT_PRIVATE_KEY_BASE64");
-const PUBLIC_KEY = getKey("JWT_PUBLIC_KEY", "JWT_PUBLIC_KEY_PATH", "JWT_PUBLIC_KEY_BASE64");
+const PRIVATE_KEY = SHARED_SECRET ? "" : getKey("JWT_PRIVATE_KEY", "JWT_PRIVATE_KEY_PATH", "JWT_PRIVATE_KEY_BASE64");
+const PUBLIC_KEY = SHARED_SECRET ? "" : getKey("JWT_PUBLIC_KEY", "JWT_PUBLIC_KEY_PATH", "JWT_PUBLIC_KEY_BASE64");
 
 function signAccessToken(payload = {}) {
   const jti = crypto.randomUUID();
   const subject = payload.sub || payload.userId;
-  const token = jwt.sign({ ...payload, sub: String(subject) }, PRIVATE_KEY, {
-    algorithm: "RS256",
-    expiresIn: ACCESS_EXP,
-    issuer: ISSUER,
-    audience: AUDIENCE,
-    jwtid: jti,
-  });
+  const token = jwt.sign(
+    { ...payload, sub: String(subject) },
+    SHARED_SECRET || PRIVATE_KEY,
+    {
+      algorithm: SHARED_SECRET ? "HS256" : "RS256",
+      expiresIn: ACCESS_EXP,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      jwtid: jti,
+    }
+  );
   return { token, jti };
 }
 
 function verifyAccessToken(token, extraOptions = {}) {
-  return jwt.verify(token, PUBLIC_KEY, {
-    algorithms: ["RS256"],
+  const verifyBase = {
     issuer: ISSUER,
     audience: AUDIENCE,
     ...extraOptions,
+  };
+
+  if (SHARED_SECRET) {
+    return jwt.verify(token, SHARED_SECRET, {
+      algorithms: ["HS256"],
+      ...verifyBase,
+    });
+  }
+
+  return jwt.verify(token, PUBLIC_KEY, {
+    algorithms: ["RS256"],
+    ...verifyBase,
   });
 }
 

@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import styles from './detail.module.css';
+import { sanitizeBaseUrl } from '../../lib/backend-url';
 
 export default function DocumentDetail() {
   const { query: { id } } = useRouter();
@@ -31,7 +32,10 @@ export default function DocumentDetail() {
 
   const isRichContent = content && typeof content === 'object';
   const plainText = isRichContent ? content?.text || '' : content;
-  const fileHref = isRichContent && content?.filename ? `/uploads/${content.filename}` : null;
+  const backendBaseUrl = sanitizeBaseUrl(process.env.NEXT_PUBLIC_BACKEND_URL || '');
+  const fileHref = isRichContent && content?.filename
+    ? `${backendBaseUrl}/uploads/${content.filename}`
+    : null;
 
   return (
     <div className={styles.page}>
