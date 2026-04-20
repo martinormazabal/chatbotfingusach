@@ -8,6 +8,7 @@ export default function DocumentUpload() {
   const [title, setTitle] = useState('');
   const [feedback, setFeedback] = useState({ type: '', text: '' });
   const [isLoading, setIsLoading] = useState(false);
+  const [useOCR, setUseOCR] = useState(false);
 
   const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
   const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
@@ -43,6 +44,7 @@ export default function DocumentUpload() {
       const formData = new FormData();
       formData.append('document', file);
       formData.append('title', title);
+      formData.append('useOCR', String(useOCR));
 
       const response = await fetch(uploadEndpoint, {
         method: 'POST',
@@ -102,6 +104,7 @@ export default function DocumentUpload() {
       setFeedback({ type: alertType, text: alertText });
       setFile(null);
       setTitle('');
+      setUseOCR(false);
       e.target.reset(); // Resetea el formulario, incluyendo el input de archivo.
 
     } catch (error) {
@@ -177,6 +180,19 @@ export default function DocumentUpload() {
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Si se deja vacío se usará el nombre del archivo"
             />
+          </label>
+
+          <label className={styles.field}>
+            <span>Procesamiento OCR</span>
+            <label>
+              <input
+                type="checkbox"
+                name="useOCR"
+                checked={useOCR}
+                onChange={(e) => setUseOCR(e.target.checked)}
+              />
+              {' '}Aplicar OCR solo si el PDF no tiene texto embebido
+            </label>
           </label>
 
           <button

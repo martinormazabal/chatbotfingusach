@@ -24,6 +24,7 @@ export default function DocumentsPage() {
       'ocr-success': { label: 'Texto extraído mediante OCR', tone: 'success' },
       'ocr-empty': { label: 'OCR sin texto legible', tone: 'warning' },
       'ocr-failed': { label: 'OCR fallido o pendiente', tone: 'danger' },
+      'ocr-skipped': { label: 'OCR omitido por usuario', tone: 'info' },
       pending: { label: 'Pendiente de procesamiento', tone: 'info' },
     }),
     []
@@ -238,8 +239,18 @@ export default function DocumentsPage() {
                     </p>
                   </div>
                   <div className={styles.actions}>
+                  {doc.source_url ? (
+                      <a
+                        href={doc.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.ghostButton}
+                      >
+                        Ver documento
+                      </a>
+                    ) : null}
                     <button onClick={() => toggleExpand(doc)} className={styles.secondaryButton}>
-                      {expandedId === doc.id ? "Ver menos" : "Ver más"}
+                    {expandedId === doc.id ? "Ocultar texto" : "Ver texto chatbot"}
                     </button>
                     <button
                       onClick={() => handleRunOCR(doc)}
@@ -268,6 +279,9 @@ export default function DocumentsPage() {
                     <p className={styles.statusMessage}>{doc.ocr_message}</p>
                   )}
                 </div>
+                {!doc.source_url && (
+                  <p className={styles.notice}>No hay archivo vinculado en Storage para este documento.</p>
+                )}
                 {(!doc.content || !doc.content.trim()) && (
                   <p className={styles.notice}>{doc.ocr_message || 'No se ha extraído texto todavía. Ejecuta el OCR para intentarlo.'}</p>
                 )}
