@@ -6,13 +6,19 @@ const pool = require("../db");
 const fs = require("fs").promises;
 const { v4: uuidv4 } = require("uuid");
 const fetch = require("node-fetch");
+const { createClient } = require("@supabase/supabase-js");
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', 'uploads');
 const tempImageDir = path.join(__dirname, '..', 'temp_images');
-const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || "documents";
+const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
+const supabaseEnabled = Boolean(supabaseUrl && supabaseServiceRoleKey);
+const supabaseClient = supabaseEnabled
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } })
+  : null;
+let checkedBucket = null;
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -189,71 +195,91 @@ const uploadMiddleware = (req, res, next) => {
       return res.status(status).json({
         error: 'Error al procesar el archivo',
         details: err.code === 'LIMIT_FILE_SIZE'
-          ? 'El archivo supera el límite de 50 MB permitido por el servidor.'
-          : err.message
-      });
-    }
-    if (err) {
-      return next(err);
-    }
-    next();
-  });
+        ? 'El archivo supera el límite de 50 MB permitido por el servidor.'
+        : err.message
+    });
+  }
+  if (err) {
+    return next(err);
+  }
+  next();
+});
 };
 
 function toSafeFilename(filename = "") {
-  return filename
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 160) || "document.pdf";
+return filename
+  .replace(/[^a-zA-Z0-9._-]/g, "_")
+  .replace(/_+/g, "_")
+  .replace(/^_+|_+$/g, "")
+  .slice(0, 160) || "document.pdf";
 }
 
 function parseBooleanField(value) {
-  if (typeof value === "boolean") return value;
-  if (typeof value !== "string") return false;
-  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+if (typeof value === "boolean") return value;
+if (typeof value !== "string") return false;
+return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+async function ensureSupabaseBucketExists() {
+if (!supabaseClient) {
+  throw new Error("Faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY para usar Storage.");
+}
+
+if (checkedBucket === supabaseBucket) {
+  return;
+}
+
+const { data: buckets, error } = await supabaseClient.storage.listBuckets();
+if (error) {
+  throw new Error(`No fue posible listar buckets de Supabase Storage: ${error.message}`);
+}
+
+const exists = (buckets || []).some((bucket) => bucket.name === supabaseBucket);
+if (!exists) {
+  throw new Error(`Bucket '${supabaseBucket}' no existe en Supabase Storage`);
+}
+
+checkedBucket = supabaseBucket;
 }
 
 async function uploadToSupabaseStorage(localPath, storagePath, mimetype = "application/pdf") {
-  if (!supabaseUrl || !supabaseServiceRoleKey) {
-    throw new Error("Faltan SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY para subir a Storage.");
-  }
+await ensureSupabaseBucketExists();
 
-  const fileBuffer = await fs.readFile(localPath);
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${supabaseBucket}/${storagePath}`;
-  const response = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${supabaseServiceRoleKey}`,
-      apikey: supabaseServiceRoleKey,
-      "Content-Type": mimetype,
-      "x-upsert": "true"
-    },
-    body: fileBuffer
+const fileBuffer = await fs.readFile(localPath);
+const { error: uploadError } = await supabaseClient.storage
+  .from(supabaseBucket)
+  .upload(storagePath, fileBuffer, {
+    contentType: mimetype,
+    upsert: true
   });
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Supabase Storage rechazó la subida (${response.status}): ${body || "sin detalle"}`);
-  }
-
-  return `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${storagePath}`;
+if (uploadError) {
+  throw new Error(`Supabase Storage rechazó la subida: ${uploadError.message}`);
 }
 
-async function deleteFromSupabaseStorage(storagePath) {
-  if (!supabaseUrl || !supabaseServiceRoleKey || !storagePath) {
-    return;
-  }
+const { data } = supabaseClient.storage
+  .from(supabaseBucket)
+  .getPublicUrl(storagePath);
 
-  await fetch(`${supabaseUrl}/storage/v1/object/${supabaseBucket}/${storagePath}`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${supabaseServiceRoleKey}`,
-      apikey: supabaseServiceRoleKey
-    }
-  }).catch((error) => {
-    console.warn("No se pudo eliminar archivo en Supabase Storage:", error.message);
-  });
+if (!data?.publicUrl) {
+  throw new Error("No fue posible construir la URL pública del archivo en Supabase Storage.");
+}
+
+return { publicUrl: data.publicUrl, storagePath };
+}
+
+async function deleteFromSupabaseStorage(storagePath, { throwOnError = true } = {}) {
+if (!storagePath) return;
+
+await ensureSupabaseBucketExists();
+const { error } = await supabaseClient.storage.from(supabaseBucket).remove([storagePath]);
+
+if (error) {
+  if (throwOnError) {
+    throw new Error(`No se pudo eliminar archivo de Supabase Storage: ${error.message}`);
+  }
+  console.warn("No se pudo eliminar archivo en Supabase Storage:", error.message);
+}
 }
 
 // Nota: La ruta de carga es segura y no realiza OCR automáticamente.
@@ -266,149 +292,161 @@ async function deleteFromSupabaseStorage(storagePath) {
 // 3. Insertar contenido en normative_texts si aplica y devolver el documento con estado de OCR.
 
 router.post('/upload', uploadMiddleware, async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'Archivo no recibido' });
-  }
+let uploadedStoragePath = null;
+if (!req.file) {
+  return res.status(400).json({ error: 'Archivo no recibido' });
+}
+
+try {
+  let extractedText = '';
+  const useOCR = parseBooleanField(req.body.useOCR);
+  const storageFilename = `${uuidv4()}-${toSafeFilename(req.file.originalname)}`;
+  const uploadedBy = req.body.uploaded_by || 'Anónimo';
+  const title = req.body.title || req.file.originalname;
+  const uploadResult = await uploadToSupabaseStorage(req.file.path, storageFilename, req.file.mimetype);
+  uploadedStoragePath = uploadResult.storagePath;
+  const ocrMetadata = {
+    attempted: false,
+    succeeded: false,
+    used: false,
+    status: 'pending',
+    message: ''
+  };
 
   try {
-    let extractedText = '';
-    const useOCR = parseBooleanField(req.body.useOCR);
-    const storageFilename = `${uuidv4()}-${toSafeFilename(req.file.originalname)}`;
-    const uploadedBy = req.body.uploaded_by || 'Anónimo';
-    const title = req.body.title || req.file.originalname;
-    const fileSourceUrl = await uploadToSupabaseStorage(req.file.path, storageFilename, req.file.mimetype);
-    const ocrMetadata = {
-      attempted: false,
-      succeeded: false,
-      used: false,
-      status: 'pending',
-      message: ''
-    };
-
-    try {
-      const pdfData = await fs.readFile(req.file.path);
-      const pdfInfo = await pdfParse(pdfData);
-      extractedText = (pdfInfo.text || '').trim();
-      if (extractedText) {
-        ocrMetadata.message = 'Se detectó texto incrustado en el PDF. No fue necesario ejecutar OCR.';
-        ocrMetadata.succeeded = true;
-        ocrMetadata.status = 'embedded-text';
-      }
-    } catch (parseError) {
-      console.warn('Fallo al extraer texto incrustado con pdf-parse. Se intentará OCR.', parseError);
+    const pdfData = await fs.readFile(req.file.path);
+    const pdfInfo = await pdfParse(pdfData);
+    extractedText = (pdfInfo.text || '').trim();
+    if (extractedText) {
+      ocrMetadata.message = 'Se detectó texto incrustado en el PDF. No fue necesario ejecutar OCR.';
+      ocrMetadata.succeeded = true;
+      ocrMetadata.status = 'embedded-text';
     }
+  } catch (parseError) {
+    console.warn('Fallo al extraer texto incrustado con pdf-parse. Se intentará OCR.', parseError);
+  }
 
-    if (!extractedText && useOCR) {
-      ocrMetadata.attempted = true;
-      try {
-        extractedText = (await enhancedOCRProcessing(req.file.path, req.file.originalname)).trim();
-        ocrMetadata.succeeded = extractedText.length > 0;
-        ocrMetadata.used = true;
-        ocrMetadata.message = ocrMetadata.succeeded
-          ? 'Texto extraído correctamente mediante OCR.'
-          : 'OCR finalizó, pero no se encontró texto legible en el documento.';
-        ocrMetadata.status = ocrMetadata.succeeded ? 'ocr-success' : 'ocr-empty';
-      } catch (ocrError) {
-        console.error('Error ejecutando OCR durante la subida del documento:', ocrError);
-        ocrMetadata.succeeded = false;
-        ocrMetadata.status = 'ocr-failed';
-        ocrMetadata.message = 'No fue posible extraer texto automáticamente. Puede ejecutar el OCR manualmente desde la interfaz.';
-      }
-    } else if (!extractedText && !useOCR) {
-      ocrMetadata.status = 'ocr-skipped';
-      ocrMetadata.message = 'OCR no solicitado. El archivo se almacenó sin extracción de texto.';
-    }
-
-    const cleanedText = improveTextLegibility(extractedText);
-    const hasText = Boolean(cleanedText);
-    const ocrUsed = Boolean(ocrMetadata.used || (ocrMetadata.attempted && ocrMetadata.succeeded));
-    const sourceUrl = fileSourceUrl;
-
-    let result;
+  if (!extractedText && useOCR) {
+    ocrMetadata.attempted = true;
     try {
-      result = await pool.query(
-        `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, source_url, has_text, ocr_used, ocr_status, ocr_message)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, title, upload_date, filename, original_filename, source_url, has_text, ocr_used, ocr_status, ocr_message`,
-        [
-          title,
-          cleanedText,
-          uploadedBy,
-          storageFilename,
-          req.file.originalname,
-          sourceUrl,
-          hasText,
-          ocrUsed,
-          ocrMetadata.status,
-          ocrMetadata.message
-        ]
-      );
-    } catch (err) {
-        // Fallback para esquemas antiguos sin columnas nuevas como original_filename, source_url o has_text
-        if (String(err.code) === "42703") {
-          try {
+      extractedText = (await enhancedOCRProcessing(req.file.path, req.file.originalname)).trim();
+      ocrMetadata.succeeded = extractedText.length > 0;
+      ocrMetadata.used = true;
+      ocrMetadata.message = ocrMetadata.succeeded
+        ? 'Texto extraído correctamente mediante OCR.'
+        : 'OCR finalizó, pero no se encontró texto legible en el documento.';
+      ocrMetadata.status = ocrMetadata.succeeded ? 'ocr-success' : 'ocr-empty';
+    } catch (ocrError) {
+      console.error('Error ejecutando OCR durante la subida del documento:', ocrError);
+      ocrMetadata.succeeded = false;
+      ocrMetadata.status = 'ocr-failed';
+      ocrMetadata.message = 'No fue posible extraer texto automáticamente. Puede ejecutar el OCR manualmente desde la interfaz.';
+    }
+  } else if (!extractedText && !useOCR) {
+    ocrMetadata.status = 'ocr-skipped';
+    ocrMetadata.message = 'OCR no solicitado. El archivo se almacenó sin extracción de texto.';
+  }
+
+  const cleanedText = improveTextLegibility(extractedText);
+  const hasText = Boolean(cleanedText);
+  const ocrUsed = Boolean(ocrMetadata.used || (ocrMetadata.attempted && ocrMetadata.succeeded));
+  const sourceUrl = uploadResult.publicUrl;
+  const storagePath = uploadResult.storagePath;
+
+  let result;
+  try {
+    result = await pool.query(
+      `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, source_url, file_url, storage_path, has_text, ocr_used, ocr_status, ocr_message)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING id, title, upload_date, filename, original_filename, source_url, file_url, storage_path, has_text, ocr_used, ocr_status, ocr_message`,
+      [
+        title,
+        cleanedText,
+        uploadedBy,
+        storageFilename,
+        req.file.originalname,
+        sourceUrl,
+        sourceUrl,
+        storagePath,
+        hasText,
+        ocrUsed,
+        ocrMetadata.status,
+        ocrMetadata.message
+      ]
+    );
+  } catch (err) {
+      // Fallback para esquemas antiguos sin columnas nuevas como original_filename, source_url o has_text
+      if (String(err.code) === "42703") {
+        try {
+          result = await pool.query(
+            `INSERT INTO documents (title, content, uploaded_by, filename, original_filename, source_url, has_text, ocr_used, ocr_status, ocr_message)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id, title, upload_date, filename, original_filename, source_url, has_text, ocr_used, ocr_status, ocr_message`,
+            [
+              title,
+              cleanedText,
+              uploadedBy,
+              storageFilename,
+              req.file.originalname,
+              sourceUrl,
+              hasText,
+              ocrUsed,
+              ocrMetadata.status,
+              ocrMetadata.message
+            ]
+          );
+        } catch (legacyErr) {
+          // Fallback mínimo cuando tampoco existen las columnas de OCR/has_text
+          if (String(legacyErr.code) === "42703") {
             result = await pool.query(
-              `INSERT INTO documents (title, content, uploaded_by, filename, has_text, ocr_used, ocr_status, ocr_message)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-              RETURNING id, title, upload_date, filename, has_text, ocr_used, ocr_status, ocr_message`,
+              `INSERT INTO documents (title, content, uploaded_by, filename)
+              VALUES ($1, $2, $3, $4)
+              RETURNING id, title, upload_date, filename`,
               [
                 title,
                 cleanedText,
                 uploadedBy,
-                storageFilename,
-                hasText,
-                ocrUsed,
-                ocrMetadata.status,
-                ocrMetadata.message
+                storageFilename
               ]
             );
-          } catch (legacyErr) {
-            // Fallback mínimo cuando tampoco existen las columnas de OCR/has_text
-            if (String(legacyErr.code) === "42703") {
-              result = await pool.query(
-                `INSERT INTO documents (title, content, uploaded_by, filename)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id, title, upload_date, filename`,
-                [
-                  title,
-                  cleanedText,
-                  uploadedBy,
-                  storageFilename
-                ]
-              );
-            } else {
-              throw legacyErr;
-            }
+          } else {
+            throw legacyErr;
           }
-      } else {
-        throw err;
-      }
+        }
+    } else {
+      throw err;
     }
-
-    const storedDoc = {
-      ...result.rows[0],
-      original_filename: result.rows[0].original_filename || req.file.originalname,
-      source_url: result.rows[0].source_url || sourceUrl,
-      has_text: typeof result.rows[0].has_text === 'boolean' ? result.rows[0].has_text : hasText,
-      ocr_used: typeof result.rows[0].ocr_used === 'boolean' ? result.rows[0].ocr_used : ocrUsed,
-      ocr_status: result.rows[0].ocr_status || ocrMetadata.status,
-      ocr_message: result.rows[0].ocr_message || ocrMetadata.message
-    };
-    if (hasText) {
-      await upsertNormativeContent(storedDoc.id, cleanedText).catch(err =>
-        console.warn('No se pudo guardar el texto en normative_texts:', err.message)
-      );
-    }
-    await fs.unlink(req.file.path).catch(() => {});
-    res.status(201).json({ success: true, document: storedDoc, ocr: ocrMetadata });
-  } catch (error) {
-    console.error(`Error en la ruta de subida: ${error.stack}`);
-    await fs.unlink(req.file.path).catch(e => console.error("Error al limpiar archivo temporal después de un error:", e));
-    res.status(500).json({
-      error: 'Error procesando documento',
-      details: error.message || 'Ocurrió un error desconocido.'
-    });
   }
+
+  const storedDoc = {
+    ...result.rows[0],
+    original_filename: result.rows[0].original_filename || req.file.originalname,
+    source_url: result.rows[0].source_url || sourceUrl,
+    file_url: result.rows[0].file_url || sourceUrl,
+    storage_path: result.rows[0].storage_path || storagePath,
+    has_text: typeof result.rows[0].has_text === 'boolean' ? result.rows[0].has_text : hasText,
+    ocr_used: typeof result.rows[0].ocr_used === 'boolean' ? result.rows[0].ocr_used : ocrUsed,
+    ocr_status: result.rows[0].ocr_status || ocrMetadata.status,
+    ocr_message: result.rows[0].ocr_message || ocrMetadata.message
+  };
+  if (hasText) {
+    await upsertNormativeContent(storedDoc.id, cleanedText).catch(err =>
+      console.warn('No se pudo guardar el texto en normative_texts:', err.message)
+    );
+  }
+  await fs.unlink(req.file.path).catch(() => {});
+  res.status(201).json({ success: true, document: storedDoc, ocr: ocrMetadata });
+} catch (error) {
+  console.error(`Error en la ruta de subida: ${error.stack}`);
+  if (uploadedStoragePath) {
+    await deleteFromSupabaseStorage(uploadedStoragePath, { throwOnError: false }).catch(() => {});
+  }
+  await fs.unlink(req.file.path).catch(e => console.error("Error al limpiar archivo temporal después de un error:", e));
+  res.status(500).json({
+    error: 'Error procesando documento',
+    details: error.message || 'Ocurrió un error desconocido.'
+  });
+}
 });
 
 // Nota: Nueva ruta para ejecutar OCR bajo demanda.
@@ -421,9 +459,9 @@ router.post('/upload', uploadMiddleware, async (req, res) => {
 // 3. Actualizar la fila en documents, sincronizar normative_texts y retornar el contenido nuevo.
 
 router.post('/:id/run-ocr', async (req, res) => {
-  const { id } = req.params;
-  try {
-    
+const { id } = req.params;
+try {
+  
     const docResult = await pool.query(
       'SELECT filename, original_filename, source_url FROM documents WHERE id = $1',
       [id]
@@ -523,6 +561,8 @@ router.get('/', async (req, res) => {
                  COALESCE(ocr_status, 'pending') AS ocr_status,
                  COALESCE(ocr_message, '') AS ocr_message,
                  source_url,
+                 file_url,
+                 storage_path,
                  TO_CHAR(upload_date, 'DD/MM/YYYY HH24:MI') AS upload_date,
                  filename
           FROM documents
@@ -547,6 +587,8 @@ router.get('/', async (req, res) => {
         ...row,
         original_filename: row.filename,
         source_url: null,
+        file_url: null,
+        storage_path: row.filename,
         has_text: Boolean(row.content),
         ocr_used: false,
         ocr_status: 'pending',
@@ -572,12 +614,13 @@ router.get('/', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const docResult = await pool.query('SELECT filename FROM documents WHERE id = $1', [id]);
+    const docResult = await pool.query('SELECT filename, storage_path FROM documents WHERE id = $1', [id]);
     if (docResult.rowCount === 0) {
       return res.status(404).json({ error: 'Documento no encontrado' });
     }
     const filenameToDelete = docResult.rows[0].filename;
-    await deleteFromSupabaseStorage(filenameToDelete);
+    const storagePath = docResult.rows[0].storage_path || filenameToDelete;
+    await deleteFromSupabaseStorage(storagePath);
     await pool.query('DELETE FROM documents WHERE id = $1', [id]);
 
     if (filenameToDelete) {
@@ -596,7 +639,7 @@ router.get('/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
-      `SELECT id, title, content, filename, original_filename, source_url,
+      `SELECT id, title, content, filename, original_filename, source_url, file_url, storage_path,
               COALESCE(has_text, false) AS has_text,
               COALESCE(ocr_used, false) AS ocr_used,
               COALESCE(ocr_status, 'pending') AS ocr_status,
