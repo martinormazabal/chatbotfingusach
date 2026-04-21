@@ -191,7 +191,7 @@ export default function DocumentUpload() {
                 checked={useOCR}
                 onChange={(e) => setUseOCR(e.target.checked)}
               />
-              {' '}Aplicar OCR solo si el PDF no tiene texto embebido
+              {' '}Procesar con OCR
             </label>
           </label>
 

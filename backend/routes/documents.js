@@ -4,8 +4,10 @@ const pdfParse = require("pdf-parse");
 const path = require("path");
 const pool = require("../db");
 const fs = require("fs").promises;
+const fsSync = require("fs");
+const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
-const fetch = require("node-fetch");
+
 const { createClient } = require("@supabase/supabase-js");
 
 const router = express.Router();
@@ -58,66 +60,109 @@ function improveTextLegibility(text = "") {
     .trim();
 }
 
-// Descripción: Ejecuta un flujo de OCR mejorado convirtiendo la primera página a imagen y reconociendo texto.
-// Entrada: filePath (string) con ruta al PDF, originalFilename (string) nombre original del archivo.
-// Salida: Texto reconocido (string) o error descriptivo si el OCR falla.
-// Procesos:
-// 1. Convertir la primera página del PDF a imagen PNG temporal con alta resolución.
-// 2. Inicializar Tesseract con idiomas español e inglés y ejecutar reconocimiento.
-// 3. Devolver el texto obtenido y limpiar recursos temporales (worker e imagen).
+async function downloadFile(fileUrl) {
+  const response = await axios.get(fileUrl, { responseType: "arraybuffer", timeout: 120000 });
+  return Buffer.from(response.data);
+}
 
-async function enhancedOCRProcessing(filePath, originalFilename) {
-  let worker;
-  const { fromPath } = require("pdf2pic");
-  const { createWorker } = require("tesseract.js");
+async function extractTextFromPDF(buffer) {
+  const data = await pdfParse(buffer);
+  return data.text?.trim() || "";
+}
 
-  const options = {
+async function convertPdfToImages(buffer, baseName = "document") {
+  const { fromBuffer } = require("pdf2pic");
+  const convert = fromBuffer(buffer, {
     density: 300,
-    saveFilename: `${path.parse(originalFilename).name}_${uuidv4()}`,
-    savePath: tempImageDir,
     format: "png",
-    width: 2000,
-    height: 2600
-  };
-  const convert = fromPath(filePath, options);
-  let convertedPage = null;
+    width: 1200,
+    height: 1600,
+    savePath: tempImageDir,
+    saveFilename: `${path.parse(baseName).name}_${uuidv4()}`
+  });
 
-  try {
-    // 1. Convert the first page of the PDF to an image.
-    console.log("Converting PDF to image for OCR...");
-    const pageToConvert = 1;
-    const result = await convert(pageToConvert, { responseType: 'image' });
-    if (!result || !result.path) {
-      throw new Error("Fallo al convertir PDF a imagen.");
-    }
-    convertedPage = result.path;
-    console.log(`Image converted successfully: ${convertedPage}`);
+  const imagePaths = [];
+  let page = 1;
 
-    // 2. Run OCR on the resulting image.
-    worker = await createWorker({
-      logger: m => console.log("Tesseract OCR:", m),
-      cachePath: "./tesseract-cache",
-    });
-    await worker.loadLanguage("spa+eng");
-    await worker.initialize("spa+eng");
-
-    const { data: { text } } = await worker.recognize(convertedPage);
-    if (!text) {
-      throw new Error("OCR no devolvió texto válido.");
-    }
-    return text;
-
-  } catch (error) {
-    console.error(`Error en el proceso de OCR mejorado: ${error.message}`);
-    throw new Error(`Falló el procesamiento OCR. El archivo puede estar corrupto o tener un formato de imagen no compatible.`);
-  } finally {
-    if (worker) {
-      await worker.terminate();
-    }
-    if (convertedPage) {
-      await fs.unlink(convertedPage).catch(e => console.error("Error al eliminar el archivo de imagen temporal:", e));
+  while (true) {
+    try {
+      const result = await convert(page, { responseType: "image" });
+      if (!result?.path) {
+        break;
+      }
+      imagePaths.push(result.path);
+      page += 1;
+    } catch (error) {
+      if (page === 1) {
+        throw new Error(`No fue posible convertir el PDF a imágenes: ${error.message}`);
+      }
+      break;
     }
   }
+
+  if (!imagePaths.length) {
+    throw new Error("No se generaron imágenes desde el PDF para OCR.");
+  }
+
+  return imagePaths;
+}
+
+async function runOCR(imagePaths) {
+  const Tesseract = require("tesseract.js");
+  let fullText = "";
+
+  for (const imagePath of imagePaths) {
+    try {
+      const result = await Tesseract.recognize(imagePath, "spa");
+      fullText += `${result?.data?.text || ""}\n`;
+    } finally {
+      if (imagePath && fsSync.existsSync(imagePath)) {
+        fsSync.unlinkSync(imagePath);
+      }
+    }
+  }
+
+  return fullText.trim();
+}
+
+async function saveText(id, content, usedOCR, status, message) {
+  await pool.query(
+    `UPDATE documents
+     SET content = $1,
+         has_text = $2,
+         ocr_used = $3,
+         ocr_status = $4,
+         ocr_message = $5
+     WHERE id = $6`,
+    [content, Boolean(content?.trim()), usedOCR, status, message, id]
+  );
+}
+
+async function markOCRFailed(id, message) {
+  await pool.query(
+    `UPDATE documents
+     SET ocr_status = 'failed',
+         ocr_message = $1
+     WHERE id = $2`,
+    [message, id]
+  );
+}
+
+async function processDocumentOCR(documentId, fileUrl, originalFilename = "document.pdf") {
+  const buffer = await downloadFile(fileUrl);
+  const embeddedText = await extractTextFromPDF(buffer);
+
+  if (embeddedText.length > 100) {
+    const cleanedEmbeddedText = improveTextLegibility(embeddedText);
+    await saveText(documentId, cleanedEmbeddedText, false, "completed", "Texto extraído sin OCR");
+    return { content: cleanedEmbeddedText, ocrUsed: false };
+  }
+
+  const images = await convertPdfToImages(buffer, originalFilename);
+  const ocrText = await runOCR(images);
+  const cleanedOCRText = improveTextLegibility(ocrText);
+  await saveText(documentId, cleanedOCRText, true, "completed", "OCR aplicado correctamente");
+  return { content: cleanedOCRText, ocrUsed: true };
 }
 
 let normativeTableReady = false;
@@ -458,97 +503,48 @@ try {
 // 2. Ejecutar enhancedOCRProcessing para obtener y limpiar el texto reconocido.
 // 3. Actualizar la fila en documents, sincronizar normative_texts y retornar el contenido nuevo.
 
-router.post('/:id/run-ocr', async (req, res) => {
-const { id } = req.params;
-try {
-  
-    const docResult = await pool.query(
-      'SELECT filename, original_filename, source_url FROM documents WHERE id = $1',
-      [id]
-    );
-    if (docResult.rowCount === 0) {
-      return res.status(404).json({ error: 'Documento no encontrado' });
-    }
-    const filename = docResult.rows[0].filename;
-    const originalFilename = docResult.rows[0].original_filename || filename;
-    const sourceUrl = docResult.rows[0].source_url;
-    let filePath = path.join(uploadDir, filename);
-    const storedFileExists = await fs.access(filePath).then(() => true).catch(() => false);
-    if (!storedFileExists) {
-      if (sourceUrl) {
-        const tempFilename = `${uuidv4()}-${toSafeFilename(originalFilename)}`;
-        const tempPath = path.join(uploadDir, tempFilename);
-        const sourceResponse = await fetch(sourceUrl);
-        if (!sourceResponse.ok) {
-          return res.status(404).json({
-            error: 'Archivo no accesible en Storage',
-            details: `No se pudo descargar el documento desde source_url (${sourceResponse.status}).`
-          });
-        }
-        const buffer = await sourceResponse.buffer();
-        await fs.writeFile(tempPath, buffer);
-        filePath = tempPath;
-      } else {
-        const altPath = path.join(uploadDir, originalFilename);
-        const altExists = await fs.access(altPath).then(() => true).catch(() => false);
-        if (!altExists) {
-          return res.status(404).json({
-            error: 'Archivo no encontrado en el servidor',
-            details: `No se halló el PDF esperado (${filename}) ni su nombre original (${originalFilename}). Vuelva a subirlo para ejecutar OCR.`
-          });
-        }
-        filePath = altPath;
-      }
-    }
-
-    const extractedText = await enhancedOCRProcessing(filePath, filename);
-    const cleanedText = improveTextLegibility(extractedText);
-    const hasCleanText = Boolean(cleanedText);
-    const finalStatus = hasCleanText ? 'ocr-success' : 'ocr-empty';
-    const finalMessage = hasCleanText
-      ? 'Texto extraído correctamente mediante OCR a solicitud manual.'
-      : 'OCR completado, pero no se encontraron caracteres legibles en el PDF.';
-
-    const updatedDoc = await pool.query(
-      `UPDATE documents
-       SET content = $1,
-           has_text = $2,
-           ocr_used = true,
-           ocr_status = $3,
-           ocr_message = $4,
-           upload_date = upload_date
-       WHERE id = $5
-       RETURNING id, content`,
-       [cleanedText.trim(), hasCleanText, finalStatus, finalMessage, id]
-    );
-
-    if (hasCleanText) {
-      await upsertNormativeContent(id, cleanedText.trim()).catch(err =>
-        console.warn('No se pudo actualizar normative_texts tras OCR manual:', err.message)
+async function runOCRHandler(req, res) {
+  const { id } = req.params;
+  try {
+      const docResult = await pool.query(
+        'SELECT id, filename, original_filename, source_url, file_url FROM documents WHERE id = $1',
+        [id]
       );
+      if (docResult.rowCount === 0) {
+        return res.status(404).json({ error: 'Documento no encontrado' });
+      }
+  
+      const documentRow = docResult.rows[0];
+      const fileUrl = documentRow.file_url || documentRow.source_url;
+      const originalFilename = documentRow.original_filename || documentRow.filename || "document.pdf";
+      if (!fileUrl) {
+        return res.status(400).json({
+          error: 'Documento sin URL de Storage',
+          details: 'El documento no tiene file_url/source_url para descargar el archivo y ejecutar OCR.'
+        });
+      }
+  
+      const { content } = await processDocumentOCR(id, fileUrl, originalFilename);
+  
+      if (content) {
+        await upsertNormativeContent(id, content).catch(err =>
+          console.warn('No se pudo actualizar normative_texts tras OCR manual:', err.message)
+        );
+      }
+  
+      res.status(200).json({
+          success: true,
+          message: 'OCR procesado y guardado correctamente.',
+          content
+      });
+    } catch (e) {
+      await markOCRFailed(id, e.message || 'OCR no disponible o falló durante la ejecución.').catch(() => {});
+      return res.status(500).json({ error: 'OCR no disponible en este entorno', details: e.message });
     }
-
-    res.status(200).json({
-        success: true,
-        message: 'OCR procesado y guardado correctamente.',
-        content: updatedDoc.rows[0].content
-    });
-    if (filePath && !storedFileExists) {
-      await fs.unlink(filePath).catch(() => {});
-    }
-  } catch (e) {
-    if (id) {
-      await pool.query(
-        `UPDATE documents
-         SET ocr_status = 'ocr-failed',
-             ocr_message = $2
-         WHERE id = $1`,
-         [id, e.message || 'OCR no disponible o falló durante la ejecución.']
-      ).catch(() => {});
-    }
-    return res.status(500).json({ error: 'OCR no disponible en este entorno', details: e.message });
   }
-});
+  
+  router.post('/:id/run-ocr', runOCRHandler);
+  router.post('/:id/ocr', runOCRHandler);
 
 router.get('/', async (req, res) => {
   try {
