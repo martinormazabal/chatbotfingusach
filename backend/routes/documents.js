@@ -19,6 +19,9 @@ const supabaseClient = supabaseEnabled
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } })
   : null;
 let checkedBucket = null;
+const MAX_PDF_BYTES = 30 * 1024 * 1024;
+const OCR_SPACE_API_URL = "https://api.ocr.space/parse/image";
+const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY || "";
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -57,47 +60,21 @@ function improveTextLegibility(text = "") {
     .trim();
 }
 
-let canvasModulePromise = null;
-let tesseractPromise = null;
-let pdfjsModulePromise = null;
-
-console.log("pdfjs version:", require("pdfjs-dist/package.json").version);
-
-async function getCanvasModule() {
-  if (!canvasModulePromise) {
-    canvasModulePromise = import("canvas");
-  }
-  const canvasModule = await canvasModulePromise;
-  return canvasModule.default || canvasModule;
-}
-
-async function getTesseract() {
-  if (!tesseractPromise) {
-    tesseractPromise = import("tesseract.js");
-  }
-  const tesseractModule = await tesseractPromise;
-  return tesseractModule.default || tesseractModule;
-}
-
-async function getPdfjs() {
-  if (!pdfjsModulePromise) {
-    pdfjsModulePromise = import("pdfjs-dist/legacy/build/pdf.mjs");
-  }
-  const pdfjsModule = await pdfjsModulePromise;
-  const pdfjsLib = pdfjsModule.default || pdfjsModule;
-  if (pdfjsLib?.GlobalWorkerOptions) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = null;
-  }
-  return pdfjsLib;
-}
-
-async function downloadPDF(fileUrl) {
+async function downloadPDF(fileUrl, maxBytes = MAX_PDF_BYTES) {
   const response = await fetch(fileUrl, { timeout: 120000 });
   if (!response.ok) {
     throw new Error(`No se pudo descargar el PDF desde Storage (${response.status} ${response.statusText})`);
   }
+  const contentLength = Number(response.headers.get("content-length")) || 0;
+  if (contentLength > maxBytes) {
+    throw new Error(`El PDF excede el tamaño máximo permitido de ${Math.floor(maxBytes / (1024 * 1024))}MB`);
+  }
   const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  const buffer = Buffer.from(arrayBuffer);
+  if (buffer.length > maxBytes) {
+    throw new Error(`El PDF excede el tamaño máximo permitido de ${Math.floor(maxBytes / (1024 * 1024))}MB`);
+  }
+  return buffer;
 }
 
 async function extractTextFromPDF(buffer) {
@@ -105,59 +82,67 @@ async function extractTextFromPDF(buffer) {
   return data.text?.trim() || "";
 }
 
-async function convertPdfToImages(buffer) {
-  try {
-    const { createCanvas } = await getCanvasModule();
-    const pdfjsLib = await getPdfjs();
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-    const pdf = await loadingTask.promise;
-    const images = [];
-
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 2 });
-      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-      const context = canvas.getContext("2d");
-
-      await page.render({
-        canvasContext: context,
-        viewport
-      }).promise;
-
-      images.push(canvas.toBuffer("image/png"));
-    }
-
-    if (!images.length) {
-      throw new Error("No se generaron imágenes desde el PDF para OCR.");
-    }
-
-    return images;
-  } catch (err) {
-    console.error("❌ Error pdfjs:", err.message);
-    throw new Error("No fue posible convertir PDF a imágenes (pdfjs falló)")
+async function runOCROnPDF(pdfBuffer, fileUrl) {
+  if (!OCR_SPACE_API_KEY) {
+    throw new Error("OCR externo no configurado: falta OCR_SPACE_API_KEY");
   }
-}
-
-async function runOCR(images) {
-  const Tesseract = await getTesseract();
-  let fullText = "";
-  for (const imageBuffer of images) {
-    const result = await Tesseract.recognize(imageBuffer, "spa");
-    fullText += `${result?.data?.text || ""}\n`;
+  if (!fileUrl) {
+    throw new Error("OCR externo requiere una URL pública del PDF");
   }
-  return fullText.trim();
+  if (!pdfBuffer?.length) {
+    throw new Error("PDF vacío o inválido para OCR");
+  }
+
+  const params = new URLSearchParams({
+    apikey: OCR_SPACE_API_KEY,
+    url: fileUrl,
+    language: "spa",
+    filetype: "PDF",
+    OCREngine: "2",
+    scale: "true",
+    isTable: "true"
+  });
+
+  const response = await fetch(OCR_SPACE_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+    timeout: 180000
+  });
+
+  if (!response.ok) {
+    throw new Error(`OCR API respondió con error HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const apiError = payload?.ErrorMessage || payload?.ErrorDetails;
+  if (payload?.IsErroredOnProcessing || apiError) {
+    const details = Array.isArray(apiError) ? apiError.join("; ") : apiError;
+    throw new Error(`OCR API falló: ${details || "Error desconocido"}`);
+  }
+
+  const parsed = Array.isArray(payload?.ParsedResults) ? payload.ParsedResults : [];
+  const mergedText = parsed.map((entry) => entry?.ParsedText || "").join("\n").trim();
+  if (!mergedText) {
+    throw new Error("OCR no detectó contenido válido");
+  }
+  return mergedText;
 }
 
 async function processOCRFromURL(fileUrl) {
   const pdfBuffer = await downloadPDF(fileUrl);
-  const images = await convertPdfToImages(pdfBuffer);
-  const text = await runOCR(images);
+  const rawText = await extractTextFromPDF(pdfBuffer);
+  if (rawText && rawText.length > 100) {
+    return improveTextLegibility(rawText);
+  }
 
-  if (!text || text.trim().length < 10) {
+  const text = await runOCROnPDF(pdfBuffer, fileUrl);
+
+  if (!text || text.trim().length < 20) {
     throw new Error("OCR no detectó contenido válido");
   }
 
-  return text;
+  return improveTextLegibility(text);
 }
 
 async function saveText(id, content, usedOCR, status, message) {
@@ -197,6 +182,23 @@ async function processDocumentOCR(documentId, fileUrl) {
   const cleanedOCRText = improveTextLegibility(ocrText);
   await saveText(documentId, cleanedOCRText, true, "completed", "OCR aplicado correctamente");
   return { content: cleanedOCRText, ocrUsed: true };
+}
+
+function queueDocumentOCR(documentId, fileUrl) {
+  setImmediate(async () => {
+    try {
+      const { content } = await processDocumentOCR(documentId, fileUrl);
+      if (content) {
+        await upsertNormativeContent(documentId, content).catch((err) =>
+          console.warn("No se pudo guardar el texto OCR en normative_texts:", err.message)
+        );
+      }
+    } catch (err) {
+      const reason = err?.message || "OCR no disponible o falló durante la ejecución.";
+      console.error(`Error OCR asíncrono para documento ${documentId}:`, err);
+      await markOCRFailed(documentId, reason).catch(() => {});
+    }
+  });
 }
 
 let normativeTableReady = false;
@@ -407,20 +409,8 @@ try {
 
   if (!extractedText && useOCR) {
     ocrMetadata.attempted = true;
-    try {
-      extractedText = (await processOCRFromURL(uploadResult.publicUrl)).trim();
-      ocrMetadata.succeeded = extractedText.length > 0;
-      ocrMetadata.used = true;
-      ocrMetadata.message = ocrMetadata.succeeded
-        ? 'Texto extraído correctamente mediante OCR.'
-        : 'OCR finalizó, pero no se encontró texto legible en el documento.';
-      ocrMetadata.status = ocrMetadata.succeeded ? 'ocr-success' : 'ocr-empty';
-    } catch (ocrError) {
-      console.error('Error ejecutando OCR durante la subida del documento:', ocrError);
-      ocrMetadata.succeeded = false;
-      ocrMetadata.status = 'ocr-failed';
-      ocrMetadata.message = 'No fue posible extraer texto automáticamente. Puede ejecutar el OCR manualmente desde la interfaz.';
-    }
+    ocrMetadata.status = 'queued';
+    ocrMetadata.message = 'OCR encolado para ejecución asíncrona.';
   } else if (!extractedText && !useOCR) {
     ocrMetadata.status = 'ocr-skipped';
     ocrMetadata.message = 'OCR no solicitado. El archivo se almacenó sin extracción de texto.';
@@ -508,6 +498,9 @@ try {
     ocr_status: result.rows[0].ocr_status || ocrMetadata.status,
     ocr_message: result.rows[0].ocr_message || ocrMetadata.message
   };
+  if (!hasText && useOCR) {
+    queueDocumentOCR(storedDoc.id, storedDoc.file_url || sourceUrl);
+  }
   if (hasText) {
     await upsertNormativeContent(storedDoc.id, cleanedText).catch(err =>
       console.warn('No se pudo guardar el texto en normative_texts:', err.message)
