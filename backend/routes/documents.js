@@ -6,6 +6,7 @@ const pool = require("../db");
 const fs = require("fs").promises;
 const fetch = require("node-fetch");
 const { v4: uuidv4 } = require("uuid");
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 
 const { createClient } = require("@supabase/supabase-js");
 
@@ -57,17 +58,10 @@ function improveTextLegibility(text = "") {
     .trim();
 }
 
-let pdfjsLibPromise = null;
 let canvasModulePromise = null;
 let tesseractPromise = null;
 
-async function getPdfjsLib() {
-  if (!pdfjsLibPromise) {
-    pdfjsLibPromise = import("pdfjs-dist/legacy/build/pdf.mjs");
-  }
-  const pdfjsModule = await pdfjsLibPromise;
-  return pdfjsModule.default || pdfjsModule;
-}
+pdfjsLib.GlobalWorkerOptions.workerSrc = require("pdfjs-dist/legacy/build/pdf.worker.js");
 
 async function getCanvasModule() {
   if (!canvasModulePromise) {
@@ -100,31 +94,35 @@ async function extractTextFromPDF(buffer) {
 }
 
 async function convertPdfToImages(buffer) {
-  const pdfjsLib = await getPdfjsLib();
   const { createCanvas } = await getCanvasModule();
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-  const pdf = await loadingTask.promise;
-  const images = [];
+  try {
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+    const pdf = await loadingTask.promise;
+    const images = [];
 
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-    const context = canvas.getContext("2d");
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+      const context = canvas.getContext("2d");
 
-    await page.render({
-      canvasContext: context,
-      viewport
-    }).promise;
+      await page.render({
+        canvasContext: context,
+        viewport
+      }).promise;
 
-    images.push(canvas.toBuffer("image/png"));
+      images.push(canvas.toBuffer("image/png"));
+    }
+
+    if (!images.length) {
+      throw new Error("No se generaron imágenes desde el PDF para OCR.");
+    }
+
+    return images;
+  } catch (err) {
+    console.warn("⚠️ pdfjs falló, usar OCR:", err.message);
+    throw new Error(`pdfjs no pudo renderizar el PDF: ${err.message}`);
   }
-
-  if (!images.length) {
-    throw new Error("No se generaron imágenes desde el PDF para OCR.");
-  }
-
-  return images;
 }
 
 async function runOCR(images) {
