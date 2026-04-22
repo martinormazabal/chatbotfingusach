@@ -4,15 +4,13 @@ const pdfParse = require("pdf-parse");
 const path = require("path");
 const pool = require("../db");
 const fs = require("fs").promises;
-const fsSync = require("fs");
-const axios = require("axios");
+const fetch = require("node-fetch");
 const { v4: uuidv4 } = require("uuid");
 
 const { createClient } = require("@supabase/supabase-js");
 
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', 'uploads');
-const tempImageDir = path.join(__dirname, '..', 'temp_images');
 const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || process.env.SUPABASE_BUCKET || "documents";
 const supabaseUrl = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
@@ -24,7 +22,6 @@ let checkedBucket = null;
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
-fs.mkdir(tempImageDir, { recursive: true }).catch(console.error);
 
 const storage = multer.diskStorage({
   destination: uploadDir,
@@ -60,9 +57,41 @@ function improveTextLegibility(text = "") {
     .trim();
 }
 
-async function downloadFile(fileUrl) {
-  const response = await axios.get(fileUrl, { responseType: "arraybuffer", timeout: 120000 });
-  return Buffer.from(response.data);
+let pdfjsLibPromise = null;
+let canvasModulePromise = null;
+let tesseractPromise = null;
+
+async function getPdfjsLib() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import("pdfjs-dist/legacy/build/pdf.mjs");
+  }
+  const pdfjsModule = await pdfjsLibPromise;
+  return pdfjsModule.default || pdfjsModule;
+}
+
+async function getCanvasModule() {
+  if (!canvasModulePromise) {
+    canvasModulePromise = import("canvas");
+  }
+  const canvasModule = await canvasModulePromise;
+  return canvasModule.default || canvasModule;
+}
+
+async function getTesseract() {
+  if (!tesseractPromise) {
+    tesseractPromise = import("tesseract.js");
+  }
+  const tesseractModule = await tesseractPromise;
+  return tesseractModule.default || tesseractModule;
+}
+
+async function downloadPDF(fileUrl) {
+  const response = await fetch(fileUrl, { timeout: 120000 });
+  if (!response.ok) {
+    throw new Error(`No se pudo descargar el PDF desde Storage (${response.status} ${response.statusText})`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
 async function extractTextFromPDF(buffer) {
@@ -70,59 +99,54 @@ async function extractTextFromPDF(buffer) {
   return data.text?.trim() || "";
 }
 
-async function convertPdfToImages(buffer, baseName = "document") {
-  const { fromBuffer } = require("pdf2pic");
-  const convert = fromBuffer(buffer, {
-    density: 300,
-    format: "png",
-    width: 1200,
-    height: 1600,
-    savePath: tempImageDir,
-    saveFilename: `${path.parse(baseName).name}_${uuidv4()}`
-  });
+async function convertPdfToImages(buffer) {
+  const pdfjsLib = await getPdfjsLib();
+  const { createCanvas } = await getCanvasModule();
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+  const pdf = await loadingTask.promise;
+  const images = [];
 
-  const imagePaths = [];
-  let page = 1;
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const context = canvas.getContext("2d");
 
-  while (true) {
-    try {
-      const result = await convert(page, { responseType: "image" });
-      if (!result?.path) {
-        break;
-      }
-      imagePaths.push(result.path);
-      page += 1;
-    } catch (error) {
-      if (page === 1) {
-        throw new Error(`No fue posible convertir el PDF a imágenes: ${error.message}`);
-      }
-      break;
-    }
+    await page.render({
+      canvasContext: context,
+      viewport
+    }).promise;
+
+    images.push(canvas.toBuffer("image/png"));
   }
 
-  if (!imagePaths.length) {
+  if (!images.length) {
     throw new Error("No se generaron imágenes desde el PDF para OCR.");
   }
 
-  return imagePaths;
+  return images;
 }
 
-async function runOCR(imagePaths) {
-  const Tesseract = require("tesseract.js");
+async function runOCR(images) {
+  const Tesseract = await getTesseract();
   let fullText = "";
+  for (const imageBuffer of images) {
+    const result = await Tesseract.recognize(imageBuffer, "spa");
+    fullText += `${result?.data?.text || ""}\n`;
+  }
+  return fullText.trim();
+}
 
-  for (const imagePath of imagePaths) {
-    try {
-      const result = await Tesseract.recognize(imagePath, "spa");
-      fullText += `${result?.data?.text || ""}\n`;
-    } finally {
-      if (imagePath && fsSync.existsSync(imagePath)) {
-        fsSync.unlinkSync(imagePath);
-      }
-    }
+async function processOCRFromURL(fileUrl) {
+  const pdfBuffer = await downloadPDF(fileUrl);
+  const images = await convertPdfToImages(pdfBuffer);
+  const text = await runOCR(images);
+
+  if (!text || text.trim().length < 10) {
+    throw new Error("OCR no detectó contenido válido");
   }
 
-  return fullText.trim();
+  return text;
 }
 
 async function saveText(id, content, usedOCR, status, message) {
@@ -148,8 +172,8 @@ async function markOCRFailed(id, message) {
   );
 }
 
-async function processDocumentOCR(documentId, fileUrl, originalFilename = "document.pdf") {
-  const buffer = await downloadFile(fileUrl);
+async function processDocumentOCR(documentId, fileUrl) {
+  const buffer = await downloadPDF(fileUrl);
   const embeddedText = await extractTextFromPDF(buffer);
 
   if (embeddedText.length > 100) {
@@ -158,8 +182,7 @@ async function processDocumentOCR(documentId, fileUrl, originalFilename = "docum
     return { content: cleanedEmbeddedText, ocrUsed: false };
   }
 
-  const images = await convertPdfToImages(buffer, originalFilename);
-  const ocrText = await runOCR(images);
+  const ocrText = await processOCRFromURL(fileUrl);
   const cleanedOCRText = improveTextLegibility(ocrText);
   await saveText(documentId, cleanedOCRText, true, "completed", "OCR aplicado correctamente");
   return { content: cleanedOCRText, ocrUsed: true };
@@ -374,7 +397,7 @@ try {
   if (!extractedText && useOCR) {
     ocrMetadata.attempted = true;
     try {
-      extractedText = (await enhancedOCRProcessing(req.file.path, req.file.originalname)).trim();
+      extractedText = (await processOCRFromURL(uploadResult.publicUrl)).trim();
       ocrMetadata.succeeded = extractedText.length > 0;
       ocrMetadata.used = true;
       ocrMetadata.message = ocrMetadata.succeeded
@@ -500,7 +523,7 @@ try {
 // Salida: Respuesta HTTP 200 con el contenido actualizado o errores 404/500 según el caso.
 // Procesos:
 // 1. Recuperar el documento y localizar el archivo físico usando filename u original_filename.
-// 2. Ejecutar enhancedOCRProcessing para obtener y limpiar el texto reconocido.
+// 2. Ejecutar processDocumentOCR para obtener y limpiar el texto reconocido.
 // 3. Actualizar la fila en documents, sincronizar normative_texts y retornar el contenido nuevo.
 
 async function runOCRHandler(req, res) {
@@ -516,7 +539,6 @@ async function runOCRHandler(req, res) {
   
       const documentRow = docResult.rows[0];
       const fileUrl = documentRow.file_url || documentRow.source_url;
-      const originalFilename = documentRow.original_filename || documentRow.filename || "document.pdf";
       if (!fileUrl) {
         return res.status(400).json({
           error: 'Documento sin URL de Storage',
@@ -524,7 +546,7 @@ async function runOCRHandler(req, res) {
         });
       }
   
-      const { content } = await processDocumentOCR(id, fileUrl, originalFilename);
+      const { content } = await processDocumentOCR(id, fileUrl);
   
       if (content) {
         await upsertNormativeContent(id, content).catch(err =>
