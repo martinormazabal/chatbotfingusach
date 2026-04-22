@@ -6,7 +6,6 @@ const pool = require("../db");
 const fs = require("fs").promises;
 const fetch = require("node-fetch");
 const { v4: uuidv4 } = require("uuid");
-const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 
 const { createClient } = require("@supabase/supabase-js");
 
@@ -60,8 +59,9 @@ function improveTextLegibility(text = "") {
 
 let canvasModulePromise = null;
 let tesseractPromise = null;
+let pdfjsModulePromise = null;
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = require("pdfjs-dist/legacy/build/pdf.worker.js");
+console.log("pdfjs version:", require("pdfjs-dist/package.json").version);
 
 async function getCanvasModule() {
   if (!canvasModulePromise) {
@@ -79,6 +79,18 @@ async function getTesseract() {
   return tesseractModule.default || tesseractModule;
 }
 
+async function getPdfjs() {
+  if (!pdfjsModulePromise) {
+    pdfjsModulePromise = import("pdfjs-dist/legacy/build/pdf.mjs");
+  }
+  const pdfjsModule = await pdfjsModulePromise;
+  const pdfjsLib = pdfjsModule.default || pdfjsModule;
+  if (pdfjsLib?.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+  }
+  return pdfjsLib;
+}
+
 async function downloadPDF(fileUrl) {
   const response = await fetch(fileUrl, { timeout: 120000 });
   if (!response.ok) {
@@ -94,8 +106,9 @@ async function extractTextFromPDF(buffer) {
 }
 
 async function convertPdfToImages(buffer) {
-  const { createCanvas } = await getCanvasModule();
   try {
+    const { createCanvas } = await getCanvasModule();
+    const pdfjsLib = await getPdfjs();
     const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
     const pdf = await loadingTask.promise;
     const images = [];
@@ -120,8 +133,8 @@ async function convertPdfToImages(buffer) {
 
     return images;
   } catch (err) {
-    console.warn("⚠️ pdfjs falló, usar OCR:", err.message);
-    throw new Error(`pdfjs no pudo renderizar el PDF: ${err.message}`);
+    console.error("❌ Error pdfjs:", err.message);
+    throw new Error("No fue posible convertir PDF a imágenes (pdfjs falló)")
   }
 }
 
