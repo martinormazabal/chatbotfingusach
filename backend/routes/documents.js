@@ -5,6 +5,7 @@ const path = require("path");
 const pool = require("../db");
 const fs = require("fs").promises;
 const fetch = require("node-fetch");
+const Tesseract = require("tesseract.js");
 const { v4: uuidv4 } = require("uuid");
 
 const { createClient } = require("@supabase/supabase-js");
@@ -20,8 +21,6 @@ const supabaseClient = supabaseEnabled
   : null;
 let checkedBucket = null;
 const MAX_PDF_BYTES = 30 * 1024 * 1024;
-const OCR_SPACE_API_URL = "https://api.ocr.space/parse/image";
-const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY || "";
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -78,71 +77,28 @@ async function downloadPDF(fileUrl, maxBytes = MAX_PDF_BYTES) {
 }
 
 async function extractTextFromPDF(buffer) {
-  const data = await pdfParse(buffer);
-  return data.text?.trim() || "";
+  try {
+    const data = await pdfParse(buffer);
+    const extractedText = data?.text?.trim() || "";
+    if (extractedText.length > 50) {
+      return extractedText;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
-async function runOCROnPDF(pdfBuffer, fileUrl) {
-  if (!OCR_SPACE_API_KEY) {
-    throw new Error("OCR externo no configurado: falta OCR_SPACE_API_KEY");
-  }
-  if (!fileUrl) {
-    throw new Error("OCR externo requiere una URL pública del PDF");
-  }
+async function runOCROnPDF(pdfBuffer) {
   if (!pdfBuffer?.length) {
     throw new Error("PDF vacío o inválido para OCR");
   }
 
-  const params = new URLSearchParams({
-    apikey: OCR_SPACE_API_KEY,
-    url: fileUrl,
-    language: "spa",
-    filetype: "PDF",
-    OCREngine: "2",
-    scale: "true",
-    isTable: "true"
+  const result = await Tesseract.recognize(pdfBuffer, "spa", {
+    logger: (message) => console.log("[Tesseract]", message)
   });
 
-  const response = await fetch(OCR_SPACE_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-    timeout: 180000
-  });
-
-  if (!response.ok) {
-    throw new Error(`OCR API respondió con error HTTP ${response.status}`);
-  }
-
-  const payload = await response.json();
-  const apiError = payload?.ErrorMessage || payload?.ErrorDetails;
-  if (payload?.IsErroredOnProcessing || apiError) {
-    const details = Array.isArray(apiError) ? apiError.join("; ") : apiError;
-    throw new Error(`OCR API falló: ${details || "Error desconocido"}`);
-  }
-
-  const parsed = Array.isArray(payload?.ParsedResults) ? payload.ParsedResults : [];
-  const mergedText = parsed.map((entry) => entry?.ParsedText || "").join("\n").trim();
-  if (!mergedText) {
-    throw new Error("OCR no detectó contenido válido");
-  }
-  return mergedText;
-}
-
-async function processOCRFromURL(fileUrl) {
-  const pdfBuffer = await downloadPDF(fileUrl);
-  const rawText = await extractTextFromPDF(pdfBuffer);
-  if (rawText && rawText.length > 100) {
-    return improveTextLegibility(rawText);
-  }
-
-  const text = await runOCROnPDF(pdfBuffer, fileUrl);
-
-  if (!text || text.trim().length < 20) {
-    throw new Error("OCR no detectó contenido válido");
-  }
-
-  return improveTextLegibility(text);
+  return result?.data?.text?.trim() || "";
 }
 
 async function saveText(id, content, usedOCR, status, message) {
@@ -172,13 +128,16 @@ async function processDocumentOCR(documentId, fileUrl) {
   const buffer = await downloadPDF(fileUrl);
   const embeddedText = await extractTextFromPDF(buffer);
 
-  if (embeddedText.length > 100) {
+  if (embeddedText) {
     const cleanedEmbeddedText = improveTextLegibility(embeddedText);
     await saveText(documentId, cleanedEmbeddedText, false, "completed", "Texto extraído sin OCR");
     return { content: cleanedEmbeddedText, ocrUsed: false };
   }
 
-  const ocrText = await processOCRFromURL(fileUrl);
+  const ocrText = await runOCROnPDF(buffer);
+  if (!ocrText || ocrText.trim().length < 10) {
+    throw new Error("No se pudo extraer contenido del documento");
+  }
   const cleanedOCRText = improveTextLegibility(ocrText);
   await saveText(documentId, cleanedOCRText, true, "completed", "OCR aplicado correctamente");
   return { content: cleanedOCRText, ocrUsed: true };
