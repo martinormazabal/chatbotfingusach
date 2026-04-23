@@ -20,7 +20,7 @@ const supabaseClient = supabaseEnabled
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } })
   : null;
 let checkedBucket = null;
-const MAX_PDF_BYTES = 30 * 1024 * 1024;
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -124,7 +124,18 @@ async function markOCRFailed(id, message) {
   );
 }
 
+async function setOCRStatus(id, status, message = null) {
+  await pool.query(
+    `UPDATE documents
+     SET ocr_status = $1,
+         ocr_message = COALESCE($2, ocr_message)
+     WHERE id = $3`,
+    [status, message, id]
+  );
+}
+
 async function processDocumentOCR(documentId, fileUrl) {
+  console.log("🔎 OCR ejecutándose en entorno:", process.env.NODE_ENV);
   const buffer = await downloadPDF(fileUrl);
   const embeddedText = await extractTextFromPDF(buffer);
 
@@ -146,6 +157,7 @@ async function processDocumentOCR(documentId, fileUrl) {
 function queueDocumentOCR(documentId, fileUrl) {
   setImmediate(async () => {
     try {
+      await setOCRStatus(documentId, "processing", "OCR en procesamiento.");
       const { content } = await processDocumentOCR(documentId, fileUrl);
       if (content) {
         await upsertNormativeContent(documentId, content).catch((err) =>
@@ -360,7 +372,7 @@ try {
     if (extractedText) {
       ocrMetadata.message = 'Se detectó texto incrustado en el PDF. No fue necesario ejecutar OCR.';
       ocrMetadata.succeeded = true;
-      ocrMetadata.status = 'embedded-text';
+      ocrMetadata.status = 'completed';
     }
   } catch (parseError) {
     console.warn('Fallo al extraer texto incrustado con pdf-parse. Se intentará OCR.', parseError);
@@ -368,10 +380,10 @@ try {
 
   if (!extractedText && useOCR) {
     ocrMetadata.attempted = true;
-    ocrMetadata.status = 'queued';
+    ocrMetadata.status = 'pending';
     ocrMetadata.message = 'OCR encolado para ejecución asíncrona.';
   } else if (!extractedText && !useOCR) {
-    ocrMetadata.status = 'ocr-skipped';
+    ocrMetadata.status = 'pending';
     ocrMetadata.message = 'OCR no solicitado. El archivo se almacenó sin extracción de texto.';
   }
 
@@ -509,22 +521,16 @@ async function runOCRHandler(req, res) {
         });
       }
   
-      const { content } = await processDocumentOCR(id, fileUrl);
-  
-      if (content) {
-        await upsertNormativeContent(id, content).catch(err =>
-          console.warn('No se pudo actualizar normative_texts tras OCR manual:', err.message)
-        );
-      }
-  
-      res.status(200).json({
-          success: true,
-          message: 'OCR procesado y guardado correctamente.',
-          content
+      await setOCRStatus(id, 'pending', 'OCR encolado para ejecución asíncrona.');
+      queueDocumentOCR(id, fileUrl);
+
+      res.status(202).json({
+        success: true,
+        message: 'OCR encolado para ejecución asíncrona.'
       });
     } catch (e) {
       await markOCRFailed(id, e.message || 'OCR no disponible o falló durante la ejecución.').catch(() => {});
-      return res.status(500).json({ error: 'OCR no disponible en este entorno', details: e.message });
+      return res.status(500).json({ error: 'No se pudo ejecutar OCR', details: e.message });
     }
   }
   
