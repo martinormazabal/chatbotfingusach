@@ -20,7 +20,7 @@ const supabaseClient = supabaseEnabled
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } })
   : null;
 let checkedBucket = null;
-const MAX_PDF_BYTES = 20 * 1024 * 1024;
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
