@@ -90,16 +90,27 @@ async function extractTextFromPDF(buffer) {
   }
 }
 
+let pdfjsLibPromise = null;
+
+async function getPdfjsLib() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import("pdfjs-dist/legacy/build/pdf.mjs");
+  }
+  return pdfjsLibPromise;
+}
+
 async function convertPdfToImages(pdfBuffer) {
   if (!pdfBuffer?.length) {
     throw new Error("PDF vacío o inválido para conversión OCR");
   }
 
   const { createCanvas } = await import("canvas");
-  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = require("pdfjs-dist/legacy/build/pdf.worker.js");
+  const pdfjsLib = await getPdfjsLib();
 
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(pdfBuffer),
+    disableWorker: true
+  });
   const pdf = await loadingTask.promise;
   const images = [];
 
