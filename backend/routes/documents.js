@@ -91,6 +91,7 @@ async function extractTextFromPDF(buffer) {
 }
 
 let pdfjsLibPromise = null;
+let nodeCanvasEnvReady = false;
 
 async function getPdfjsLib() {
   if (!pdfjsLibPromise) {
@@ -99,13 +100,67 @@ async function getPdfjsLib() {
   return pdfjsLibPromise;
 }
 
+async function ensureNodeCanvasEnvironment() {
+  if (nodeCanvasEnvReady) return;
+
+  const canvasModule = await import("canvas");
+  const { Image, ImageData, DOMMatrix } = canvasModule;
+
+  if (typeof global.Image === "undefined" && Image) {
+    global.Image = Image;
+  }
+  if (typeof global.ImageData === "undefined" && ImageData) {
+    global.ImageData = ImageData;
+  }
+  if (typeof global.DOMMatrix === "undefined" && DOMMatrix) {
+    global.DOMMatrix = DOMMatrix;
+  }
+
+  nodeCanvasEnvReady = true;
+}
+
+class NodeCanvasFactory {
+  constructor(createCanvasFn) {
+    this.createCanvas = createCanvasFn;
+  }
+
+  create(width, height) {
+    if (width <= 0 || height <= 0) {
+      throw new Error(`Tamaño inválido de canvas: ${width}x${height}`);
+    }
+    const canvas = this.createCanvas(width, height);
+    const context = canvas.getContext("2d");
+    return { canvas, context };
+  }
+
+  reset(canvasAndContext, width, height) {
+    if (!canvasAndContext?.canvas) {
+      throw new Error("Canvas no inicializado para reset");
+    }
+    canvasAndContext.canvas.width = width;
+    canvasAndContext.canvas.height = height;
+  }
+
+  destroy(canvasAndContext) {
+    if (!canvasAndContext) return;
+    if (canvasAndContext.canvas) {
+      canvasAndContext.canvas.width = 0;
+      canvasAndContext.canvas.height = 0;
+    }
+    canvasAndContext.canvas = null;
+    canvasAndContext.context = null;
+  }
+}
+
 async function convertPdfToImages(pdfBuffer) {
   if (!pdfBuffer?.length) {
     throw new Error("PDF vacío o inválido para conversión OCR");
   }
 
   const { createCanvas } = await import("canvas");
+  await ensureNodeCanvasEnvironment();
   const pdfjsLib = await getPdfjsLib();
+  const canvasFactory = new NodeCanvasFactory(createCanvas);
 
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(pdfBuffer),
@@ -117,15 +172,21 @@ async function convertPdfToImages(pdfBuffer) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const viewport = page.getViewport({ scale: 2 });
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext("2d");
+    const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
 
-    await page.render({
-      canvasContext: context,
-      viewport
-    }).promise;
+    try {
+      await page.render({
+        canvasContext: canvasAndContext.context,
+        viewport,
+        canvasFactory
+      }).promise;
 
-    images.push(canvas.toBuffer("image/png"));
+      images.push(canvasAndContext.canvas.toBuffer("image/png"));
+    } catch (err) {
+      throw new Error(`Error renderizando página ${i} del PDF: ${err?.message || err}`);
+    } finally {
+      canvasFactory.destroy(canvasAndContext);
+    }
   }
 
   if (!images.length) {
@@ -166,7 +227,7 @@ async function saveText(id, content, usedOCR, status, message) {
 async function markOCRFailed(id, message) {
   await pool.query(
     `UPDATE documents
-     SET ocr_status = 'error',
+     SET ocr_status = 'failed',
          ocr_message = $1
      WHERE id = $2`,
     [message, id]
