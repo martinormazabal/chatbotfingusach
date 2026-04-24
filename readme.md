@@ -267,7 +267,7 @@ La interfaz queda disponible en:
 
 - **Autenticación y roles:** creación de usuarios y asignación de perfiles.
 - **Gestión de contraseñas:** cambio seguro (`PUT /api/users/:id/change-password`), solicitud y confirmación de restablecimiento (`POST /api/users/password-reset/*`) con contraseñas temporales enviadas por correo.
-- **Subida de documentos:** Carga de documentos PDF con extracción de texto y OCR (Tesseract.js).
+- **Subida de documentos:** Carga de documentos PDF con extracción de texto y OCR externo (OCR.Space).
 - **Consulta normativa vía ChatBot conectado a Gemini API.** (Se requiere API Key).
 - **Registro de evaluaciones (endpoint /api/requests/log) con almacenamiento en tabla `evaluation_logs`.**
 - **Gestión de solicitudes:** búsqueda, detalle y pasos asociados.
@@ -275,8 +275,22 @@ La interfaz queda disponible en:
 ## 🖨️ Flujo de carga y OCR
 
 - Cuando un PDF incluye texto incrustado, el backend lo detecta y guarda automáticamente el contenido.
-- Si el PDF es escaneado (sin texto), durante la subida se intenta un OCR automático con Tesseract.js. El resultado informa si el texto se obtuvo o si es necesario procesarlo manualmente.
+- Si el PDF es escaneado (sin texto), durante la subida se encola OCR asíncrono con OCR.Space. El resultado informa el estado del procesamiento.
 - En la vista de documentos, los archivos sin texto muestran un aviso y permiten ejecutar el botón **"Procesar OCR"** para reintentar la extracción bajo demanda.
+
+### Variables de entorno OCR en producción (Render)
+
+En el servicio backend, configure:
+
+```env
+OCR_PROVIDER=ocr_space
+OCR_SPACE_API_KEY=<tu_api_key_de_ocr_space>
+OCR_SPACE_ENDPOINT=https://api.ocr.space/parse/image
+```
+
+- No hardcodear `OCR_SPACE_API_KEY` en el repositorio.
+- En `NODE_ENV=production`, si falta `OCR_SPACE_API_KEY`, el backend responde un error controlado.
+- Tras guardar la variable en Render, realizar **Redeploy** del servicio para que el worker OCR tome la configuración.
 
 ### Demostración sugerida
 

@@ -98,7 +98,10 @@ async function runOCRViaExternalProvider(fileUrl) {
     throw new Error(`Proveedor OCR no soportado: ${OCR_PROVIDER}`);
   }
   if (!OCR_SPACE_API_KEY) {
-    throw new Error("Falta OCR_SPACE_API_KEY para ejecutar OCR externo en producción.");
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Falta OCR_SPACE_API_KEY para ejecutar OCR externo en producción.");
+    }
+    throw new Error("OCR externo no configurado: define OCR_SPACE_API_KEY para usar OCR.Space.");
   }
   const body = new URLSearchParams({
     apikey: OCR_SPACE_API_KEY,

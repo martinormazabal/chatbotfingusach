@@ -34,3 +34,17 @@ Al subir un documento, el backend ahora:
 - Si el bucket no existe, la API responde error claro (`Bucket '<nombre>' no existe en Supabase Storage`).
 - Si falla DB después de subir, el backend intenta rollback eliminando el archivo en Storage para evitar desincronización.
 - En eliminación, primero borra en Storage y luego en DB para mantener consistencia.
+
+## 5) OCR externo en Render (producción)
+
+Además de las variables de Supabase, para OCR de PDFs escaneados configure:
+
+```env
+OCR_PROVIDER=ocr_space
+OCR_SPACE_API_KEY=<api-key-ocr-space>
+OCR_SPACE_ENDPOINT=https://api.ocr.space/parse/image
+```
+
+- `OCR_SPACE_API_KEY` debe cargarse como variable segura del servicio backend (no en código).
+- En producción, si la clave no está definida, el backend devuelve error controlado al intentar OCR externo.
+- Luego de guardar variables en Render, haga redeploy del servicio.
