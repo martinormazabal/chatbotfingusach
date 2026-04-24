@@ -22,21 +22,6 @@ const supabaseClient = supabaseEnabled
 let checkedBucket = null;
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 const OCR_MIN_TEXT_LENGTH = 10;
-let pdf2picFromBuffer = null;
-
-function getPdf2PicFromBuffer() {
-  if (pdf2picFromBuffer) {
-    return pdf2picFromBuffer;
-  }
-  try {
-    ({ fromBuffer: pdf2picFromBuffer } = require("pdf2pic"));
-  } catch (error) {
-    throw new Error(
-      "Falta la dependencia 'pdf2pic'. Instálala en backend con: npm install pdf2pic"
-    );
-  }
-  return pdf2picFromBuffer;
-}
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -105,38 +90,47 @@ async function extractTextFromPDF(buffer) {
   }
 }
 
-async function convertPDFToImages(pdfBuffer) {
+async function convertPdfToImages(pdfBuffer) {
   if (!pdfBuffer?.length) {
     throw new Error("PDF vacío o inválido para conversión OCR");
   }
 
-  const convert = getPdf2PicFromBuffer()(pdfBuffer, {
-    density: 200,
-    format: "png",
-    width: 1600,
-    height: 2300,
-    quality: 100,
-    savePath: uploadDir,
-    saveFilename: `ocr-${uuidv4()}`,
-    preserveAspectRatio: true
-  });
+  const { createCanvas } = await import("canvas");
+  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = require("pdfjs-dist/legacy/build/pdf.worker.js");
 
-  const pages = await convert.bulk(-1, { responseType: "base64" });
-  if (!Array.isArray(pages) || pages.length === 0) {
-    throw new Error("No fue posible convertir el PDF a imágenes para OCR");
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) });
+  const pdf = await loadingTask.promise;
+  const images = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext("2d");
+
+    await page.render({
+      canvasContext: context,
+      viewport
+    }).promise;
+
+    images.push(canvas.toBuffer("image/png"));
   }
-  return pages;
+
+  if (!images.length) {
+    throw new Error("No se pudieron generar imágenes desde el PDF");
+  }
+
+  return images;
 }
 
 async function runOCROnImages(imagePages = []) {
   let extractedText = "";
-  for (const [index, page] of imagePages.entries()) {
-    const base64Data = page?.base64;
-    if (!base64Data) {
-      console.warn(`Página ${index + 1} omitida: conversión sin base64.`);
+  for (const [index, imageBuffer] of imagePages.entries()) {
+    if (!imageBuffer?.length) {
+      console.warn(`Página ${index + 1} omitida: imagen vacía.`);
       continue;
     }
-    const imageBuffer = Buffer.from(base64Data, "base64");
     const result = await Tesseract.recognize(imageBuffer, "spa", {
       logger: (message) => console.log(`[Tesseract][page ${index + 1}]`, message)
     });
@@ -189,7 +183,7 @@ async function processDocumentOCR(documentId, fileUrl) {
     return { content: cleanedEmbeddedText, ocrUsed: false };
   }
 
-  const pages = await convertPDFToImages(buffer);
+  const pages = await convertPdfToImages(buffer);
   const ocrText = await runOCROnImages(pages);
   if (!ocrText || ocrText.trim().length < OCR_MIN_TEXT_LENGTH) {
     throw new Error("No se pudo extraer contenido del documento");
@@ -211,6 +205,7 @@ function queueDocumentOCR(documentId, fileUrl) {
       }
     } catch (err) {
       const reason = err?.message || "OCR no disponible o falló durante la ejecución.";
+      console.error("❌ OCR fallo:", err?.message);
       console.error(`Error OCR asíncrono para documento ${documentId}:`, err);
       await markOCRFailed(documentId, reason).catch(() => {});
     }

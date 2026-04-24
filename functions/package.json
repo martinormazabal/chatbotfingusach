@@ -35,7 +35,6 @@
     "openai": "^5.1.0",
     "pdf-parse": "^1.1.1",
     "pdf-poppler": "^0.2.1",
-    "pdf2pic": "^3.2.0",
     "pg": "^8.16.0",
     "remove-markdown": "^0.6.2",
     "tesseract-ocr": "^1.0.0",
