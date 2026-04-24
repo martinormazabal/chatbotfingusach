@@ -21,6 +21,22 @@ const supabaseClient = supabaseEnabled
   : null;
 let checkedBucket = null;
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
+const OCR_MIN_TEXT_LENGTH = 10;
+let pdf2picFromBuffer = null;
+
+function getPdf2PicFromBuffer() {
+  if (pdf2picFromBuffer) {
+    return pdf2picFromBuffer;
+  }
+  try {
+    ({ fromBuffer: pdf2picFromBuffer } = require("pdf2pic"));
+  } catch (error) {
+    throw new Error(
+      "Falta la dependencia 'pdf2pic'. Instálala en backend con: npm install pdf2pic"
+    );
+  }
+  return pdf2picFromBuffer;
+}
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -89,16 +105,44 @@ async function extractTextFromPDF(buffer) {
   }
 }
 
-async function runOCROnPDF(pdfBuffer) {
+async function convertPDFToImages(pdfBuffer) {
   if (!pdfBuffer?.length) {
-    throw new Error("PDF vacío o inválido para OCR");
+    throw new Error("PDF vacío o inválido para conversión OCR");
   }
 
-  const result = await Tesseract.recognize(pdfBuffer, "spa", {
-    logger: (message) => console.log("[Tesseract]", message)
+  const convert = getPdf2PicFromBuffer()(pdfBuffer, {
+    density: 200,
+    format: "png",
+    width: 1600,
+    height: 2300,
+    quality: 100,
+    savePath: uploadDir,
+    saveFilename: `ocr-${uuidv4()}`,
+    preserveAspectRatio: true
   });
 
-  return result?.data?.text?.trim() || "";
+  const pages = await convert.bulk(-1, { responseType: "base64" });
+  if (!Array.isArray(pages) || pages.length === 0) {
+    throw new Error("No fue posible convertir el PDF a imágenes para OCR");
+  }
+  return pages;
+}
+
+async function runOCROnImages(imagePages = []) {
+  let extractedText = "";
+  for (const [index, page] of imagePages.entries()) {
+    const base64Data = page?.base64;
+    if (!base64Data) {
+      console.warn(`Página ${index + 1} omitida: conversión sin base64.`);
+      continue;
+    }
+    const imageBuffer = Buffer.from(base64Data, "base64");
+    const result = await Tesseract.recognize(imageBuffer, "spa", {
+      logger: (message) => console.log(`[Tesseract][page ${index + 1}]`, message)
+    });
+    extractedText += `${result?.data?.text?.trim() || ""}\n`;
+  }
+  return extractedText.trim();
 }
 
 async function saveText(id, content, usedOCR, status, message) {
@@ -117,7 +161,7 @@ async function saveText(id, content, usedOCR, status, message) {
 async function markOCRFailed(id, message) {
   await pool.query(
     `UPDATE documents
-     SET ocr_status = 'failed',
+     SET ocr_status = 'error',
          ocr_message = $1
      WHERE id = $2`,
     [message, id]
@@ -141,16 +185,17 @@ async function processDocumentOCR(documentId, fileUrl) {
 
   if (embeddedText) {
     const cleanedEmbeddedText = improveTextLegibility(embeddedText);
-    await saveText(documentId, cleanedEmbeddedText, false, "completed", "Texto extraído sin OCR");
+    await saveText(documentId, cleanedEmbeddedText, false, "done", "Texto extraído sin OCR");
     return { content: cleanedEmbeddedText, ocrUsed: false };
   }
 
-  const ocrText = await runOCROnPDF(buffer);
-  if (!ocrText || ocrText.trim().length < 10) {
+  const pages = await convertPDFToImages(buffer);
+  const ocrText = await runOCROnImages(pages);
+  if (!ocrText || ocrText.trim().length < OCR_MIN_TEXT_LENGTH) {
     throw new Error("No se pudo extraer contenido del documento");
   }
   const cleanedOCRText = improveTextLegibility(ocrText);
-  await saveText(documentId, cleanedOCRText, true, "completed", "OCR aplicado correctamente");
+  await saveText(documentId, cleanedOCRText, true, "done", "OCR aplicado correctamente");
   return { content: cleanedOCRText, ocrUsed: true };
 }
 
@@ -372,7 +417,7 @@ try {
     if (extractedText) {
       ocrMetadata.message = 'Se detectó texto incrustado en el PDF. No fue necesario ejecutar OCR.';
       ocrMetadata.succeeded = true;
-      ocrMetadata.status = 'completed';
+      ocrMetadata.status = 'done';
     }
   } catch (parseError) {
     console.warn('Fallo al extraer texto incrustado con pdf-parse. Se intentará OCR.', parseError);

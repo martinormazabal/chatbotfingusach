@@ -22,11 +22,14 @@ export default function DocumentsPage() {
     () => ({
       'embedded-text': { label: 'Texto embebido detectado', tone: 'success' },
       'ocr-success': { label: 'Texto extraído mediante OCR', tone: 'success' },
+      done: { label: 'Procesamiento completado', tone: 'success' },
       completed: { label: 'Procesamiento completado', tone: 'success' },
       'ocr-empty': { label: 'OCR sin texto legible', tone: 'warning' },
       'ocr-failed': { label: 'OCR fallido o pendiente', tone: 'danger' },
+      error: { label: 'OCR fallido o pendiente', tone: 'danger' },
       failed: { label: 'OCR fallido o pendiente', tone: 'danger' },
       'ocr-skipped': { label: 'OCR omitido por usuario', tone: 'info' },
+      processing: { label: 'Procesando OCR', tone: 'info' },
       pending: { label: 'Pendiente de procesamiento', tone: 'info' },
     }),
     []
@@ -104,7 +107,7 @@ export default function DocumentsPage() {
     ));
   };
 
-  const canRequestOCR = (doc) => !doc.has_text || ['ocr-empty', 'ocr-failed', 'failed', 'pending'].includes(doc.ocr_status);
+  const canRequestOCR = (doc) => !doc.has_text || ['ocr-empty', 'ocr-failed', 'failed', 'error', 'pending'].includes(doc.ocr_status);
 
   // ADDED: Function to handle on-demand OCR processing.
   const handleRunOCR = async (doc) => {
