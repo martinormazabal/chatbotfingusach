@@ -12,7 +12,9 @@
     "db:migrate": "node scripts/quickMigrate.js",
     "test:requests": "node scripts/smoke-requests-route.js",
     "jwt:env": "node scripts/jwt-env-helper.js",
-    "test:jwt-security": "node scripts/jwt-security-analysis.js"
+    "test:jwt-security": "node scripts/jwt-security-analysis.js",
+    "prestart": "node scripts/verifyPgInstall.js",
+    "verify:pg": "node scripts/verifyPgInstall.js"
   },
   "keywords": [],
   "author": "",
@@ -44,7 +46,7 @@
     "pdf-parse": "^1.1.4",
     "pdf-poppler": "^0.2.3",
     "pdfjs-dist": "^5.6.205",
-    "pg": "^8.13.3",
+    "pg": "^8.20.0",
     "remove-markdown": "^0.6.0",
     "tesseract.js": "^7.0.0",
     "uuid": "^14.0.0"
@@ -52,5 +54,9 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=18",
+    "npm": ">=9"
   }
 }

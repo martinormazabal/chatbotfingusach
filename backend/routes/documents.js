@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
 const path = require("path");
+const crypto = require("crypto");
 const pool = require("../db");
 const fs = require("fs").promises;
 const fetch = require("node-fetch");
@@ -26,6 +27,9 @@ const OCR_MIN_TEXT_LENGTH = 10;
 const OCR_POLL_INTERVAL_MS = Number(process.env.OCR_JOB_POLL_INTERVAL_MS || 4000);
 const OCR_PROVIDER = (process.env.OCR_PROVIDER || "ocr_space").toLowerCase();
 const OCR_SPACE_ENDPOINT = process.env.OCR_SPACE_ENDPOINT || "https://api.ocr.space/parse/image";
+const OCR_SPACE_TIMEOUT_MS = Number(process.env.OCR_SPACE_TIMEOUT_MS || 120000);
+const OCR_SPACE_ENGINE = String(process.env.OCR_SPACE_ENGINE || "1");
+const OCR_SPACE_BASE64_MAX_BYTES = Number(process.env.OCR_SPACE_BASE64_MAX_BYTES || 3 * 1024 * 1024);
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -65,11 +69,26 @@ function improveTextLegibility(text = "") {
 }
 
 async function downloadPDF(fileUrl, maxBytes = MAX_PDF_BYTES) {
-  const response = await fetch(fileUrl, { timeout: 120000 });
+  console.log("⬇️ Descargando PDF desde Storage:", fileUrl);
+  let response;
+  try {
+    response = await fetch(fileUrl, { timeout: 120000 });
+  } catch (err) {
+    throw new Error(`No se pudo descargar PDF desde Supabase (${err.message})`);
+  }
+
+  const contentType = response.headers.get("content-type");
+  const contentLengthHeader = response.headers.get("content-length");
+  console.log("📥 Storage respondió:", {
+    status: response.status,
+    statusText: response.statusText,
+    contentType,
+    contentLength: contentLengthHeader,
+  });
   if (!response.ok) {
     throw new Error(`No se pudo descargar el PDF desde Storage (${response.status} ${response.statusText})`);
   }
-  const contentLength = Number(response.headers.get("content-length")) || 0;
+  const contentLength = Number(contentLengthHeader) || 0;
   if (contentLength > maxBytes) {
     throw new Error(`El PDF excede el tamaño máximo permitido de ${Math.floor(maxBytes / (1024 * 1024))}MB`);
   }
@@ -78,6 +97,8 @@ async function downloadPDF(fileUrl, maxBytes = MAX_PDF_BYTES) {
   if (buffer.length > maxBytes) {
     throw new Error(`El PDF excede el tamaño máximo permitido de ${Math.floor(maxBytes / (1024 * 1024))}MB`);
   }
+  assertValidPDFBuffer(buffer);
+  console.log("✅ PDF descargado íntegro desde Storage:", getPDFDiagnostics(buffer));
   return buffer;
 }
 
@@ -103,48 +124,39 @@ async function getFormLength(form) {
   });
 }
 
-function summarizeOCRPayload(payload) {
+function summarizeOCRPayload(payload, limit = 4000) {
   const raw = typeof payload === "string" ? payload : JSON.stringify(payload);
   if (!raw) return "<sin cuerpo>";
-  return raw.length > 2000 ? `${raw.slice(0, 2000)}...<truncado>` : raw;
+  return raw.length > limit ? `${raw.slice(0, limit)}...<truncado>` : raw;
 }
 
-async function runOCRViaExternalProvider(fileUrl) {
-  if (OCR_PROVIDER !== "ocr_space") {
-    throw new Error(`Proveedor OCR no soportado: ${OCR_PROVIDER}`);
-  }
-  if (!process.env.OCR_SPACE_API_KEY) {
-    throw new Error("Falta OCR_SPACE_API_KEY");
-  }
-  if (!fileUrl) {
-    throw new Error("No se recibió URL de archivo para OCR");
-  }
+function getOCRSpaceCommonFields() {
+  return {
+    apikey: process.env.OCR_SPACE_API_KEY,
+    language: process.env.OCR_SPACE_LANGUAGE || "spa",
+    isOverlayRequired: "false",
+    OCREngine: OCR_SPACE_ENGINE,
+    detectOrientation: "true",
+    scale: "true",
+    filetype: "PDF",
+  };
+}
 
-  const startedAt = Date.now();
-  console.log("⬇️ Descargando PDF desde Storage:", fileUrl);
+function appendOCRSpaceFields(form) {
+  const fields = getOCRSpaceCommonFields();
+  Object.entries(fields).forEach(([key, value]) => form.append(key, value));
+}
 
-  let response;
-  try {
-    response = await fetch(fileUrl, { timeout: 120000 });
-  } catch (err) {
-    console.error("❌ Error descargando PDF desde Storage:", err);
-    throw new Error(`No se pudo descargar PDF desde Supabase (${err.message})`);
-  }
+function getPDFDiagnostics(buffer) {
+  return {
+    bytes: buffer.length,
+    sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+    startsWithPDF: buffer.slice(0, 4).toString() === "%PDF",
+  };
+}
 
-  console.log("📥 Storage respondió:", {
-    status: response.status,
-    statusText: response.statusText,
-    contentType: response.headers.get("content-type"),
-    contentLength: response.headers.get("content-length")
-  });
-
-  if (!response.ok) {
-    throw new Error(`No se pudo descargar PDF desde Supabase (${response.status})`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-
-  if (!buffer || buffer.length === 0) {
+function assertValidPDFBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new Error("PDF descargado vacío");
   }
   if (buffer.length > MAX_PDF_BYTES) {
@@ -153,16 +165,11 @@ async function runOCRViaExternalProvider(fileUrl) {
   if (buffer.slice(0, 4).toString() !== "%PDF") {
     console.warn("⚠️ El archivo descargado no inicia con firma %PDF; se enviará como application/pdf de todos modos.");
   }
+}
 
-  console.log(`📦 PDF descargado: ${buffer.length} bytes`);
-
+async function postOCRSpaceMultipart(buffer, diagnostics) {
   const form = new FormData();
-  form.append("apikey", process.env.OCR_SPACE_API_KEY);
-  form.append("language", "spa");
-  form.append("isOverlayRequired", "false");
-  form.append("OCREngine", "2");
-  form.append("detectOrientation", "true");
-  form.append("scale", "true");
+  appendOCRSpaceFields(form);
   form.append("file", buffer, {
     filename: "document.pdf",
     contentType: "application/pdf",
@@ -176,52 +183,79 @@ async function runOCRViaExternalProvider(fileUrl) {
     console.warn("⚠️ No se pudo calcular Content-Length multipart:", err.message);
   }
 
-  console.log("📤 Enviando PDF a OCR.Space...", {
+  console.log("📤 Enviando PDF a OCR.Space (multipart/form-data)...", {
     endpoint: OCR_SPACE_ENDPOINT,
-    pdfBytes: buffer.length,
+    pdfBytes: diagnostics.bytes,
+    pdfSha256: diagnostics.sha256,
+    startsWithPDF: diagnostics.startsWithPDF,
     contentLength: headers["Content-Length"] || "no-calculado",
-    timeoutMs: 120000
+    timeoutMs: OCR_SPACE_TIMEOUT_MS,
+    engine: OCR_SPACE_ENGINE,
   });
 
-  let ocrResponse;
-  try {
-    ocrResponse = await axios.post(OCR_SPACE_ENDPOINT, form, {
-      headers,
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-      timeout: 120000,
-      responseType: "text",
-      transformResponse: [(data) => data]
-    });
-  } catch (err) {
-    const elapsedMs = Date.now() - startedAt;
-    const status = err.response?.status || "sin respuesta";
-    const body = summarizeOCRPayload(err.response?.data || err.message);
-    console.error("❌ OCR.Space request failed:", {
-      status,
-      elapsedMs,
-      body,
-      message: err.message,
-      code: err.code
-    });
+  return axios.post(OCR_SPACE_ENDPOINT, form, {
+    headers,
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    timeout: OCR_SPACE_TIMEOUT_MS,
+    responseType: "text",
+    transformResponse: [(data) => data],
+    validateStatus: () => true,
+  });
+}
 
-    throw new Error(`OCR externo rechazó la solicitud (${status})`);
+async function postOCRSpaceBase64(buffer, diagnostics) {
+  if (buffer.length > OCR_SPACE_BASE64_MAX_BYTES) {
+    throw new Error(
+      `No se reintentó OCR.Space con base64: PDF de ${buffer.length} bytes supera OCR_SPACE_BASE64_MAX_BYTES=${OCR_SPACE_BASE64_MAX_BYTES}`
+    );
   }
 
-  const elapsedMs = Date.now() - startedAt;
-  console.log("✅ OCR.Space respondió correctamente", {
-    status: ocrResponse.status,
-    elapsedMs,
-    contentType: ocrResponse.headers?.["content-type"]
+  const body = new URLSearchParams();
+  const fields = getOCRSpaceCommonFields();
+  Object.entries(fields).forEach(([key, value]) => body.append(key, value));
+  body.append("base64Image", `data:application/pdf;base64,${buffer.toString("base64")}`);
+
+  console.log("📤 Reintentando OCR.Space (base64 form-url-encoded)...", {
+    endpoint: OCR_SPACE_ENDPOINT,
+    pdfBytes: diagnostics.bytes,
+    pdfSha256: diagnostics.sha256,
+    timeoutMs: OCR_SPACE_TIMEOUT_MS,
+    engine: OCR_SPACE_ENGINE,
   });
-  console.log("📄 Respuesta OCR.Space:", summarizeOCRPayload(ocrResponse.data));
+
+  return axios.post(OCR_SPACE_ENDPOINT, body.toString(), {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    timeout: OCR_SPACE_TIMEOUT_MS,
+    responseType: "text",
+    transformResponse: [(data) => data],
+    validateStatus: () => true,
+  });
+}
+
+function parseOCRSpaceResponse(ocrResponse, attemptName) {
+  const status = ocrResponse?.status;
+  const body = ocrResponse?.data;
+  const contentType = ocrResponse?.headers?.["content-type"];
+
+  console.log("📄 Respuesta OCR.Space:", {
+    attempt: attemptName,
+    status,
+    contentType,
+    body: summarizeOCRPayload(body),
+  });
+
+  if (status < 200 || status >= 300) {
+    throw new Error(`OCR externo rechazó la solicitud (${status}). Respuesta: ${summarizeOCRPayload(body)}`);
+  }
 
   let data;
   try {
-    data = typeof ocrResponse.data === "string" ? JSON.parse(ocrResponse.data) : ocrResponse.data;
+    data = typeof body === "string" ? JSON.parse(body) : body;
   } catch (err) {
-    console.error("❌ OCR.Space devolvió una respuesta no JSON:", summarizeOCRPayload(ocrResponse.data));
-    throw new Error("OCR.Space devolvió una respuesta inválida no JSON");
+    throw new Error(`OCR.Space devolvió una respuesta no JSON (${contentType || "sin content-type"}): ${summarizeOCRPayload(body)}`);
   }
 
   if (!data || typeof data !== "object") {
@@ -231,8 +265,8 @@ async function runOCRViaExternalProvider(fileUrl) {
   if (data.IsErroredOnProcessing) {
     const detail = Array.isArray(data.ErrorMessage)
       ? data.ErrorMessage.join(", ")
-      : data.ErrorMessage || "OCR.Space no pudo procesar el archivo";
-    throw new Error(detail);
+      : data.ErrorMessage || data.ErrorDetails || "OCR.Space no pudo procesar el archivo";
+    throw new Error(`OCR.Space reportó error de procesamiento: ${detail}`);
   }
 
   const text = data.ParsedResults
@@ -240,13 +274,69 @@ async function runOCRViaExternalProvider(fileUrl) {
     .join("\n")
     .trim();
 
-  console.log("📝 Texto OCR extraído:", { chars: text?.length || 0 });
-
   if (!text || text.length < 5) {
     throw new Error("OCR no devolvió texto válido");
   }
 
   return text;
+}
+
+async function runOCRViaExternalProvider(fileUrl, predownloadedBuffer = null) {
+  if (OCR_PROVIDER !== "ocr_space") {
+    throw new Error(`Proveedor OCR no soportado: ${OCR_PROVIDER}`);
+  }
+  if (!process.env.OCR_SPACE_API_KEY) {
+    throw new Error("Falta OCR_SPACE_API_KEY");
+  }
+  if (!fileUrl && !predownloadedBuffer) {
+    throw new Error("No se recibió URL de archivo para OCR");
+  }
+
+  const startedAt = Date.now();
+  const buffer = predownloadedBuffer || await downloadPDF(fileUrl);
+  assertValidPDFBuffer(buffer);
+  const diagnostics = getPDFDiagnostics(buffer);
+  console.log("📦 PDF listo para OCR.Space:", diagnostics);
+
+  let lastError;
+  const attempts = [
+    { name: "multipart", send: () => postOCRSpaceMultipart(buffer, diagnostics) },
+  ];
+
+  if (buffer.length <= OCR_SPACE_BASE64_MAX_BYTES) {
+    attempts.push({ name: "base64", send: () => postOCRSpaceBase64(buffer, diagnostics) });
+  }
+
+  for (const attempt of attempts) {
+    try {
+      const response = await attempt.send();
+      const text = parseOCRSpaceResponse(response, attempt.name);
+      console.log("✅ OCR.Space procesó el documento", {
+        attempt: attempt.name,
+        status: response.status,
+        elapsedMs: Date.now() - startedAt,
+        chars: text.length,
+      });
+      return text;
+    } catch (err) {
+      lastError = err;
+      console.error("❌ Intento OCR.Space falló:", {
+        attempt: attempt.name,
+        elapsedMs: Date.now() - startedAt,
+        message: err.message,
+        code: err.code,
+        responseStatus: err.response?.status,
+        responseBody: summarizeOCRPayload(err.response?.data),
+      });
+
+      const status = err.response?.status || Number(String(err.message).match(/\((\d{3})\)/)?.[1]);
+      if (attempt.name === "multipart" && status && status < 500) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error("OCR externo no devolvió respuesta utilizable");
 }
 
 async function saveText(id, content, usedOCR, status, message) {
@@ -293,7 +383,7 @@ async function processDocumentOCR(documentId, fileUrl) {
     return { content: cleanedEmbeddedText, ocrUsed: false };
   }
 
-  const ocrText = await runOCRViaExternalProvider(fileUrl);
+  const ocrText = await runOCRViaExternalProvider(fileUrl, buffer);
   if (!ocrText || ocrText.trim().length < OCR_MIN_TEXT_LENGTH) {
     throw new Error("No se pudo extraer contenido del documento");
   }
@@ -302,12 +392,30 @@ async function processDocumentOCR(documentId, fileUrl) {
   return { content: cleanedOCRText, ocrUsed: true };
 }
 
+let documentsOCRColumnsReady = false;
 let ocrJobsReady = false;
 let ocrWorkerStarted = false;
 let ocrWorkerBusy = false;
 
+async function ensureDocumentOCRColumns() {
+  if (documentsOCRColumnsReady) return;
+  await pool.query(
+    `ALTER TABLE documents
+       ADD COLUMN IF NOT EXISTS original_filename TEXT,
+       ADD COLUMN IF NOT EXISTS source_url TEXT,
+       ADD COLUMN IF NOT EXISTS file_url TEXT,
+       ADD COLUMN IF NOT EXISTS storage_path TEXT,
+       ADD COLUMN IF NOT EXISTS has_text BOOLEAN DEFAULT FALSE,
+       ADD COLUMN IF NOT EXISTS ocr_used BOOLEAN DEFAULT FALSE,
+       ADD COLUMN IF NOT EXISTS ocr_status VARCHAR(50) DEFAULT 'pending',
+       ADD COLUMN IF NOT EXISTS ocr_message TEXT;`
+  );
+  documentsOCRColumnsReady = true;
+}
+
 async function ensureOCRJobsTable() {
   if (ocrJobsReady) return;
+  await ensureDocumentOCRColumns();
   await pool.query(
     `CREATE TABLE IF NOT EXISTS ocr_jobs (
       id BIGSERIAL PRIMARY KEY,
@@ -628,6 +736,8 @@ try {
   const ocrUsed = Boolean(ocrMetadata.used || (ocrMetadata.attempted && ocrMetadata.succeeded));
   const sourceUrl = uploadResult.publicUrl;
   const storagePath = uploadResult.storagePath;
+
+  await ensureDocumentOCRColumns();
 
   let result;
   try {
