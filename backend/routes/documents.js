@@ -26,10 +26,13 @@ const MAX_PDF_BYTES = 10 * 1024 * 1024;
 const OCR_MIN_TEXT_LENGTH = 10;
 const OCR_POLL_INTERVAL_MS = Number(process.env.OCR_JOB_POLL_INTERVAL_MS || 4000);
 const OCR_PROVIDER = (process.env.OCR_PROVIDER || "ocr_space").toLowerCase();
+const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY || "";
 const OCR_SPACE_ENDPOINT = process.env.OCR_SPACE_ENDPOINT || "https://api.ocr.space/parse/image";
 const OCR_SPACE_TIMEOUT_MS = Number(process.env.OCR_SPACE_TIMEOUT_MS || 120000);
 const OCR_SPACE_ENGINE = String(process.env.OCR_SPACE_ENGINE || "1");
 const OCR_SPACE_BASE64_MAX_BYTES = Number(process.env.OCR_SPACE_BASE64_MAX_BYTES || 3 * 1024 * 1024);
+const OCR_SPACE_MAX_ATTEMPTS = 2;
+const OCR_SPACE_RETRY_DELAY_MS = 5000;
 
 // Ensure directories exist
 fs.mkdir(uploadDir, { recursive: true }).catch(console.error);
@@ -132,7 +135,7 @@ function summarizeOCRPayload(payload, limit = 4000) {
 
 function getOCRSpaceCommonFields() {
   return {
-    apikey: process.env.OCR_SPACE_API_KEY,
+    apikey: OCR_SPACE_API_KEY,
     language: process.env.OCR_SPACE_LANGUAGE || "spa",
     isOverlayRequired: "false",
     OCREngine: OCR_SPACE_ENGINE,
@@ -145,6 +148,19 @@ function getOCRSpaceCommonFields() {
 function appendOCRSpaceFields(form) {
   const fields = getOCRSpaceCommonFields();
   Object.entries(fields).forEach(([key, value]) => form.append(key, value));
+}
+
+function redactOCRHeaders(headers = {}) {
+  return Object.fromEntries(
+    Object.entries(headers).map(([key, value]) => [
+      key,
+      key.toLowerCase() === "apikey" ? "<redacted>" : value,
+    ])
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getPDFDiagnostics(buffer) {
@@ -183,6 +199,9 @@ async function postOCRSpaceMultipart(buffer, diagnostics) {
     console.warn("⚠️ No se pudo calcular Content-Length multipart:", err.message);
   }
 
+  console.log("OCR request size:", buffer.length);
+  console.log("OCR endpoint:", OCR_SPACE_ENDPOINT);
+  console.log("OCR headers:", redactOCRHeaders(headers));
   console.log("📤 Enviando PDF a OCR.Space (multipart/form-data)...", {
     endpoint: OCR_SPACE_ENDPOINT,
     pdfBytes: diagnostics.bytes,
@@ -216,6 +235,10 @@ async function postOCRSpaceBase64(buffer, diagnostics) {
   Object.entries(fields).forEach(([key, value]) => body.append(key, value));
   body.append("base64Image", `data:application/pdf;base64,${buffer.toString("base64")}`);
 
+  const headers = { "Content-Type": "application/x-www-form-urlencoded" };
+  console.log("OCR request size:", buffer.length);
+  console.log("OCR endpoint:", OCR_SPACE_ENDPOINT);
+  console.log("OCR headers:", redactOCRHeaders(headers));
   console.log("📤 Reintentando OCR.Space (base64 form-url-encoded)...", {
     endpoint: OCR_SPACE_ENDPOINT,
     pdfBytes: diagnostics.bytes,
@@ -225,7 +248,7 @@ async function postOCRSpaceBase64(buffer, diagnostics) {
   });
 
   return axios.post(OCR_SPACE_ENDPOINT, body.toString(), {
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers,
     maxContentLength: Infinity,
     maxBodyLength: Infinity,
     timeout: OCR_SPACE_TIMEOUT_MS,
@@ -248,7 +271,9 @@ function parseOCRSpaceResponse(ocrResponse, attemptName) {
   });
 
   if (status < 200 || status >= 300) {
-    throw new Error(`OCR externo rechazó la solicitud (${status}). Respuesta: ${summarizeOCRPayload(body)}`);
+    const error = new Error(`OCR externo rechazó la solicitud (${status}). Respuesta: ${summarizeOCRPayload(body)}`);
+    error.response = ocrResponse;
+    throw error;
   }
 
   let data;
@@ -285,8 +310,14 @@ async function runOCRViaExternalProvider(fileUrl, predownloadedBuffer = null) {
   if (OCR_PROVIDER !== "ocr_space") {
     throw new Error(`Proveedor OCR no soportado: ${OCR_PROVIDER}`);
   }
-  if (!process.env.OCR_SPACE_API_KEY) {
-    throw new Error("Falta OCR_SPACE_API_KEY");
+  if (!OCR_SPACE_API_KEY) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Falta OCR_SPACE_API_KEY para ejecutar OCR externo en producción.");
+    }
+
+    throw new Error(
+      "OCR externo no configurado: define OCR_SPACE_API_KEY para usar OCR.Space."
+    );
   }
   if (!fileUrl && !predownloadedBuffer) {
     throw new Error("No se recibió URL de archivo para OCR");
@@ -299,40 +330,55 @@ async function runOCRViaExternalProvider(fileUrl, predownloadedBuffer = null) {
   console.log("📦 PDF listo para OCR.Space:", diagnostics);
 
   let lastError;
-  const attempts = [
-    { name: "multipart", send: () => postOCRSpaceMultipart(buffer, diagnostics) },
-  ];
+  for (let attemptNumber = 1; attemptNumber <= OCR_SPACE_MAX_ATTEMPTS; attemptNumber += 1) {
+    const attemptName = attemptNumber === 1
+      ? "multipart"
+      : buffer.length <= OCR_SPACE_BASE64_MAX_BYTES
+        ? "base64"
+        : "multipart-retry";
 
-  if (buffer.length <= OCR_SPACE_BASE64_MAX_BYTES) {
-    attempts.push({ name: "base64", send: () => postOCRSpaceBase64(buffer, diagnostics) });
-  }
-
-  for (const attempt of attempts) {
     try {
-      const response = await attempt.send();
-      const text = parseOCRSpaceResponse(response, attempt.name);
+      const attemptStartedAt = Date.now();
+      const response = attemptName === "base64"
+        ? await postOCRSpaceBase64(buffer, diagnostics)
+        : await postOCRSpaceMultipart(buffer, diagnostics);
+      const text = parseOCRSpaceResponse(response, attemptName);
       console.log("✅ OCR.Space procesó el documento", {
-        attempt: attempt.name,
+        attempt: attemptName,
+        attemptNumber,
         status: response.status,
         elapsedMs: Date.now() - startedAt,
+        responseMs: Date.now() - attemptStartedAt,
         chars: text.length,
       });
       return text;
     } catch (err) {
       lastError = err;
-      console.error("❌ Intento OCR.Space falló:", {
-        attempt: attempt.name,
-        elapsedMs: Date.now() - startedAt,
+      const status = err.response?.status || Number(String(err.message).match(/\((\d{3})\)/)?.[1]);
+      const elapsedMs = Date.now() - startedAt;
+      const errorDetails = {
+        attempt: attemptName,
+        attemptNumber,
+        elapsedMs,
         message: err.message,
         code: err.code,
         responseStatus: err.response?.status,
-        responseBody: summarizeOCRPayload(err.response?.data),
-      });
+        responseHeaders: err.response?.headers,
+        responseBody: summarizeOCRPayload(err.response?.data, 12000),
+        pdfBytes: diagnostics.bytes,
+      };
+      console.error("❌ Intento OCR.Space falló:", errorDetails);
 
-      const status = err.response?.status || Number(String(err.message).match(/\((\d{3})\)/)?.[1]);
-      if (attempt.name === "multipart" && status && status < 500) {
+      if (status === 502) {
+        console.error("❌ OCR.Space 502 Bad Gateway completo:", errorDetails);
+      }
+
+      if (!status || status < 500 || attemptNumber >= OCR_SPACE_MAX_ATTEMPTS) {
         break;
       }
+
+      console.warn(`⏳ OCR.Space respondió ${status}; reintentando en ${OCR_SPACE_RETRY_DELAY_MS}ms (${attemptNumber}/${OCR_SPACE_MAX_ATTEMPTS})`);
+      await sleep(OCR_SPACE_RETRY_DELAY_MS);
     }
   }
 
