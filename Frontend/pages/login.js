@@ -69,8 +69,8 @@ export default function LoginPage() {
           <p className={styles.helperText}>¿Olvidaste tu contraseña? Contacta a soporte TI de USACH.</p>
           <p className={styles.helperText}>
             ¿Aún no tienes acceso?{' '}
-            <Link href="/admin/create-user?source=login" legacyBehavior>
-              <a className={styles.ctaLink}>Crear cuentas</a>
+            <Link href="/register" legacyBehavior>
+              <a className={styles.ctaLink}>Crear cuenta estudiante</a>
             </Link>
           </p>
           <p className={styles.feedback} aria-live="assertive">

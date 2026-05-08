@@ -115,7 +115,7 @@ export default function Home() {
               <p>Administra cuentas y roles de forma segura y consistente.</p>
             </div>
             <div className={styles.actionGrid}>
-              <Link href="/admin/create-user?source=login" legacyBehavior>
+              <Link href="/admin/create-user" legacyBehavior>
                 <a className={`${styles.actionCard} ${styles.actionPrimary}`}>
                   <h3>Crear Usuario</h3>
                   <p>Registra nuevas personas con perfiles alineados al rol institucional.</p>

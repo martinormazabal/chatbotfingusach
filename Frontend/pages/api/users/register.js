@@ -9,9 +9,7 @@ export default async function handler(req, res) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-role": req.headers["x-user-role"] || "",
-          "x-user-email": req.headers["x-user-email"] || "",
-          "x-access-source": req.headers["x-access-source"] || "",
+          Authorization: req.headers.authorization || "",
         },
         body: JSON.stringify(req.body),
       });

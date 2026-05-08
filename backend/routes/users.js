@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const pool = require("../db");
 const nodemailer = require("nodemailer");
 const requireAuth = require("../middleware/auth");
+const { verifyAccessToken } = require("../helpers/jwt");
 require("dotenv").config();
 
 const router = express.Router();
@@ -37,6 +38,8 @@ const VALID_ROLES = [
 ];
 
 const ALLOWED_ROLE_METHODS = ["PUT", "POST"];
+const PUBLIC_REGISTRATION_ROLE = "estudiante";
+const PRIVILEGED_REGISTRATION_ERROR = "No autorizado para crear usuarios con privilegios";
 
 const PASSWORD_POLICY = {
   minLength: 6,
@@ -170,6 +173,32 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
+function optionalAuth(req, res, next) {
+  try {
+    const auth = req.headers.authorization || "";
+    if (!auth.startsWith("Bearer ")) {
+      return next();
+    }
+
+    const token = auth.slice(7);
+    const payload = verifyAccessToken(token);
+    req.user = {
+      id: Number(payload.sub),
+      role: payload.role,
+      email: payload.email,
+      jti: payload.jti,
+    };
+    return next();
+  } catch (error) {
+    console.error("Token opcional inválido en registro de usuario:", error);
+    return res.status(401).json({ message: "Token inválido o expirado" });
+  }
+}
+
+function canCreateRequestedRole(req, role) {
+  return role === PUBLIC_REGISTRATION_ROLE || req.user?.role === "admin";
+}
+
 async function getUserByEmail(email, client) {
   const db = client || pool;
   const result = await db.query("SELECT * FROM users WHERE email = $1", [email]);
@@ -197,7 +226,7 @@ async function ensurePasswordResetTable() {
 }
 
 // Endpoint para crear un nuevo usuario
-router.post("/register", async (req, res) => {
+router.post("/register", optionalAuth, async (req, res) => {
   try {
     const { username, email, password, role } = req.body;
 
@@ -212,6 +241,13 @@ router.post("/register", async (req, res) => {
       sanitizedRole = sanitizeRole(role);
     } catch (roleError) {
       return res.status(400).json({ message: roleError.message });
+    }
+
+    if (!canCreateRequestedRole(req, sanitizedRole)) {
+      return res.status(403).json({
+        error: PRIVILEGED_REGISTRATION_ERROR,
+        message: PRIVILEGED_REGISTRATION_ERROR,
+      });
     }
 
     const existingUser = await getUserByEmail(email);

@@ -1,9 +1,28 @@
-import React from 'react';
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from 'next/router';
-import { isRootAdminEmail } from '../../lib/rbac';
+import { useRouter } from "next/router";
+import { isRootAdminEmail } from "../../lib/rbac";
 import styles from "./createUser.module.css";
+
+const ADMIN_ROLE_OPTIONS = [
+  { value: "estudiante", label: "Estudiante" },
+  { value: "funcionario", label: "Funcionario" },
+  { value: "admin", label: "Administrador" },
+];
+
+function getStoredSession() {
+  const rawUser = localStorage.getItem("user");
+  if (!rawUser) return null;
+
+  const parsedUser = JSON.parse(rawUser);
+  const user = parsedUser?.user || parsedUser;
+  return {
+    ...user,
+    role: (user?.role || "").toLowerCase(),
+    email: (user?.email || "").toLowerCase(),
+    accessToken: user?.accessToken || parsedUser?.accessToken || "",
+  };
+}
 
 export default function CreateUser() {
   const router = useRouter();
@@ -15,86 +34,68 @@ export default function CreateUser() {
   });
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [session, setSession] = useState(null);
   const [isAuthorized, setIsAuthorized] = useState(false);
-  const [currentUserRole, setCurrentUserRole] = useState('');
-  const [currentUserEmail, setCurrentUserEmail] = useState('');
-
-  const accessSource = useMemo(
-    () => (typeof router.query.source === 'string' ? router.query.source : ''),
-    [router.query.source]
-  );
 
   useEffect(() => {
-    if (!router.isReady) return;
-
-    const rawUser = localStorage.getItem('user');
-    if (!rawUser) {
-      const canSelfRegister = accessSource === 'login';
-      setIsAuthorized(canSelfRegister);
-      if (!canSelfRegister) {
-        setMessage('Solo Funcionario/Admin o acceso desde login pueden crear usuarios.');
-      }
-      return;
-    }
-
     try {
-      const parsedUser = JSON.parse(rawUser);
-      const role = (parsedUser?.role || parsedUser?.user?.role || '').toLowerCase();
-      const email = (parsedUser?.email || parsedUser?.user?.email || '').toLowerCase();
-      const allowed = role === 'funcionario' || role === 'admin' || isRootAdminEmail(email) || accessSource === 'login';
-      setCurrentUserRole(role);
-      setCurrentUserEmail(email);
-      setIsAuthorized(allowed);
+      const storedSession = getStoredSession();
+      const allowed =
+        storedSession?.role === "admin" || isRootAdminEmail(storedSession?.email || "");
+
+      setSession(storedSession);
+      setIsAuthorized(Boolean(allowed));
+
       if (!allowed) {
-        setMessage('No tienes permisos para crear usuarios.');
+        setMessage("Solo un administrador autenticado puede crear usuarios con privilegios.");
       }
     } catch {
+      setSession(null);
       setIsAuthorized(false);
-      setCurrentUserRole('');
-      setCurrentUserEmail('');
-      setMessage('No se pudo validar tu sesión.');
+      setMessage("No se pudo validar tu sesión administrativa.");
     }
-  }, [accessSource, router.isReady]);
+  }, []);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setFormData((current) => ({ ...current, [name]: value }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!isAuthorized) {
-      setMessage('No tienes permisos para crear usuarios.');
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!isAuthorized || !session?.accessToken) {
+      setMessage("Debes iniciar sesión como administrador para crear usuarios.");
       return;
     }
+
     setIsLoading(true);
-    setMessage(""); // Clear previous messages
+    setMessage("");
+
     try {
-      const res = await fetch("/api/users/register", {
+      const response = await fetch("/api/users/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-role": currentUserRole,
-          "x-user-email": currentUserEmail,
-          "x-access-source": accessSource,
+          Authorization: `Bearer ${session.accessToken}`,
         },
         body: JSON.stringify(formData),
       });
-      const data = await res.json();      
-      if (res.ok) {
-        setMessage("Usuario creado exitosamente: " + data.user.email);
-      } else {
-        // The backend sends specific messages for validation or duplicate errors
-        setMessage(data.message || "Error desconocido al registrar usuario");
-      }
+      const data = await response.json();
 
+      if (response.ok) {
+        setMessage(`Usuario creado exitosamente: ${data.user.email}`);
+      } else {
+        setMessage(data.error || data.message || "Error desconocido al registrar usuario");
+      }
     } catch (error) {
       console.error("Error en handleSubmit (fetch or JSON parse):", error);
-      // This catch block is for network errors or issues parsing the response
       setMessage("Error de conexión o respuesta inválida del servidor.");
     } finally {
       setIsLoading(false);
     }
   };
+
+  const goToLogin = () => router.push("/login");
 
   return (
     <div className={styles.page}>
@@ -104,8 +105,8 @@ export default function CreateUser() {
         </Link>
         <h1>Gestión de Usuarios</h1>
         <p>
-          Completa los campos para crear una cuenta. Los mensajes de ayuda y errores se muestran de forma clara para una experiencia
-          consistente.
+          Completa los campos para crear una cuenta desde el panel administrativo protegido.
+          Los roles privilegiados solo se habilitan para administradores autenticados.
         </p>
         <ul className={styles.hints}>
           <li>Utiliza correos institucionales válidos.</li>
@@ -122,7 +123,7 @@ export default function CreateUser() {
 
         {!isAuthorized && (
           <p className={styles.feedback} role="alert">
-            {message || 'Acceso denegado.'}
+            {message || "Acceso denegado."}
           </p>
         )}
 
@@ -135,6 +136,7 @@ export default function CreateUser() {
               placeholder="Ej: Ana Perez"
               onChange={handleChange}
               required
+              disabled={!isAuthorized}
             />
           </label>
 
@@ -143,9 +145,10 @@ export default function CreateUser() {
             <input
               type="email"
               name="email"
-              placeholder="usuario@usach.cl; Ej:ana.perez@usach.cl"
+              placeholder="usuario@usach.cl; Ej: ana.perez@usach.cl"
               onChange={handleChange}
               required
+              disabled={!isAuthorized}
             />
           </label>
 
@@ -154,9 +157,10 @@ export default function CreateUser() {
             <input
               type="password"
               name="password"
-              placeholder="Mínimo 6 caracteres"
+              placeholder="Mínimo 6 caracteres, con mayúscula, minúscula y número"
               onChange={handleChange}
               required
+              disabled={!isAuthorized}
             />
           </label>
 
@@ -165,18 +169,25 @@ export default function CreateUser() {
             <select
               name="role"
               onChange={handleChange}
-              defaultValue="estudiante"
+              value={formData.role}
+              disabled={!isAuthorized}
             >
-              <option value="estudiante">Estudiante</option>
-              <option value="funcionario">Funcionario</option>
-              <option value="administrador de documentos">Administrador de documentos</option>
+              {ADMIN_ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
 
           <button type="submit" disabled={isLoading || !isAuthorized} className={styles.submitButton}>
             {isLoading ? "Creando..." : "Registrar"}
           </button>
-
+          {!isAuthorized && (
+            <button type="button" onClick={goToLogin} className={styles.submitButton}>
+              Iniciar sesión como administrador
+            </button>
+          )}
           <p className={styles.feedback} role="status" aria-live="polite">
             {message}
           </p>
