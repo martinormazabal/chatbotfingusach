@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const pool = require("../db");
 const nodemailer = require("nodemailer");
 const requireAuth = require("../middleware/auth");
-const { verifyAccessToken } = require("../helpers/jwt");
+const { verifyAccessToken, safeJwtMetadata } = require("../helpers/jwt");
 require("dotenv").config();
 
 const router = express.Router();
@@ -40,6 +40,7 @@ const VALID_ROLES = [
 const ALLOWED_ROLE_METHODS = ["PUT", "POST"];
 const PUBLIC_REGISTRATION_ROLE = "estudiante";
 const PRIVILEGED_REGISTRATION_ERROR = "No autorizado para crear usuarios con privilegios";
+const PRIVILEGED_CREATOR_ROLES = ["funcionario", "admin"];
 
 const PASSWORD_POLICY = {
   minLength: 6,
@@ -173,15 +174,39 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
-function optionalAuth(req, res, next) {
-  try {
-    const auth = req.headers.authorization || "";
-    if (!auth.startsWith("Bearer ")) {
-      return next();
-    }
+function classifyTokenError(error) {
+  if (error.name === "TokenExpiredError") return "expired";
+  if (error.name === "JsonWebTokenError") return "invalid_signature_or_format";
+  if (error.name === "NotBeforeError") return "not_active";
+  return "unknown";
+}
 
-    const token = auth.slice(7);
+function logOptionalAuthFailure(error, token) {
+  const metadata = safeJwtMetadata(token);
+  console.warn("Token opcional inválido en registro de usuario", {
+    reason: classifyTokenError(error),
+    errorName: error.name,
+    errorMessage: error.message,
+    token: metadata,
+  });
+}
+
+function optionalAuth(req, res, next) {
+  const auth = req.headers.authorization || "";
+  if (!auth.startsWith("Bearer ")) {
+    req.authStatus = "absent";
+    return next();
+  }
+
+  const token = auth.slice(7).trim();
+  if (!token) {
+    req.authStatus = "absent";
+    return next();
+  }
+
+  try {
     const payload = verifyAccessToken(token);
+    req.authStatus = "authenticated";
     req.user = {
       id: Number(payload.sub),
       role: payload.role,
@@ -190,13 +215,43 @@ function optionalAuth(req, res, next) {
     };
     return next();
   } catch (error) {
-    console.error("Token opcional inválido en registro de usuario:", error);
-    return res.status(401).json({ message: "Token inválido o expirado" });
+    req.authStatus = "invalid";
+    req.authError = {
+      reason: classifyTokenError(error),
+      name: error.name,
+      message: error.message,
+    };
+    logOptionalAuthFailure(error, token);
+    return next();
   }
 }
 
+function hasPrivilegedCreatorRole(user) {
+  return PRIVILEGED_CREATOR_ROLES.includes((user?.role || "").toLowerCase());
+}
+
 function canCreateRequestedRole(req, role) {
-  return role === PUBLIC_REGISTRATION_ROLE || req.user?.role === "admin";
+  return role === PUBLIC_REGISTRATION_ROLE || hasPrivilegedCreatorRole(req.user);
+}
+
+function rejectInvalidPrivilegedAuth(req, res) {
+  if (req.authStatus === "invalid") {
+    const isExpired = req.authError?.reason === "expired";
+    return res.status(401).json({
+      message: isExpired ? "Token expirado" : "Token inválido o mal firmado",
+      authStatus: req.authStatus,
+      authReason: req.authError?.reason || "unknown",
+    });
+  }
+
+  if (req.authStatus === "absent") {
+    return res.status(401).json({
+      message: "Token Bearer requerido para crear usuarios con privilegios",
+      authStatus: req.authStatus,
+    });
+  }
+
+  return null;
 }
 
 async function getUserByEmail(email, client) {
@@ -244,6 +299,10 @@ router.post("/register", optionalAuth, async (req, res) => {
     }
 
     if (!canCreateRequestedRole(req, sanitizedRole)) {
+      if (sanitizedRole !== PUBLIC_REGISTRATION_ROLE) {
+        const authRejection = rejectInvalidPrivilegedAuth(req, res);
+        if (authRejection) return authRejection;
+      }
       return res.status(403).json({
         error: PRIVILEGED_REGISTRATION_ERROR,
         message: PRIVILEGED_REGISTRATION_ERROR,

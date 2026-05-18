@@ -7,6 +7,7 @@ const ISSUER = process.env.JWT_ISSUER || "chatbot-fing-usach";
 const AUDIENCE = process.env.JWT_AUDIENCE || "chatbot-clients";
 const ACCESS_EXP = process.env.JWT_ACCESS_EXP || "15m";
 const SHARED_SECRET = process.env.JWT_SECRET ? String(process.env.JWT_SECRET).trim() : "";
+const AUTH_DIAGNOSTICS_ENABLED = process.env.JWT_DIAGNOSTICS !== "false";
 
 function normalizeKeyValue(rawValue) {
   if (!rawValue) return "";
@@ -69,6 +70,83 @@ function getKey(name, pathName, base64Name) {
 const PRIVATE_KEY = SHARED_SECRET ? "" : getKey("JWT_PRIVATE_KEY", "JWT_PRIVATE_KEY_PATH", "JWT_PRIVATE_KEY_BASE64");
 const PUBLIC_KEY = SHARED_SECRET ? "" : getKey("JWT_PUBLIC_KEY", "JWT_PUBLIC_KEY_PATH", "JWT_PUBLIC_KEY_BASE64");
 
+function fingerprint(value) {
+  if (!value) return null;
+  return crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 16);
+}
+
+function formatNumericDate(value) {
+  if (!Number.isFinite(Number(value))) return null;
+  const date = new Date(Number(value) * 1000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function safeJwtMetadata(token) {
+  const decoded = jwt.decode(token, { complete: true }) || {};
+  const header = decoded.header || {};
+  const payload = decoded.payload || {};
+  return {
+    algorithm: header.alg || "unknown",
+    keyId: header.kid || null,
+    issuer: payload.iss || null,
+    audience: payload.aud || null,
+    subject: payload.sub || null,
+    role: payload.role || null,
+    expiresAt: formatNumericDate(payload.exp),
+    issuedAt: formatNumericDate(payload.iat),
+    tokenFingerprint: fingerprint(token),
+  };
+}
+
+function logAuthDiagnostic(message, metadata = {}, level = "log") {
+  if (!AUTH_DIAGNOSTICS_ENABLED) return;
+  const safeMetadata = {
+    issuerExpected: ISSUER,
+    audienceExpected: AUDIENCE,
+    activeAlgorithm: SHARED_SECRET ? "HS256" : "RS256",
+    ...metadata,
+  };
+  console[level](`[auth:jwt] ${message}`, safeMetadata);
+}
+
+function assertRsaKeyPairMatches() {
+  if (SHARED_SECRET) {
+    logAuthDiagnostic("JWT configurado con secreto compartido HS256", {
+      secretFingerprint: fingerprint(SHARED_SECRET),
+      hasLegacySharedSecret: true,
+    });
+    return;
+  }
+
+  const privateKeyObject = crypto.createPrivateKey(PRIVATE_KEY);
+  const publicKeyObject = crypto.createPublicKey(PUBLIC_KEY);
+  const publicFromPrivate = crypto.createPublicKey(privateKeyObject)
+    .export({ type: "spki", format: "pem" })
+    .toString();
+  const configuredPublic = publicKeyObject.export({ type: "spki", format: "pem" }).toString();
+
+  if (publicFromPrivate !== configuredPublic) {
+    const error = new Error(
+      "JWT_PRIVATE_KEY y JWT_PUBLIC_KEY no pertenecen al mismo par criptográfico RSA."
+    );
+    logAuthDiagnostic(
+      "Par RSA incompatible; los tokens firmados por este backend no podrán validarse con la clave pública configurada",
+      {
+        privateKeyPublicFingerprint: fingerprint(publicFromPrivate),
+        configuredPublicKeyFingerprint: fingerprint(configuredPublic),
+      },
+      "error"
+    );
+    throw error;
+  }
+
+  logAuthDiagnostic("Par RSA JWT validado correctamente", {
+    publicKeyFingerprint: fingerprint(configuredPublic),
+  });
+}
+
+assertRsaKeyPairMatches();
+
 function signAccessToken(payload = {}) {
   const jti = crypto.randomUUID();
   const subject = payload.sub || payload.userId;
@@ -83,27 +161,45 @@ function signAccessToken(payload = {}) {
       jwtid: jti,
     }
   );
+  logAuthDiagnostic("Access token emitido", safeJwtMetadata(token));
   return { token, jti };
 }
 
 function verifyAccessToken(token, extraOptions = {}) {
+  const metadata = safeJwtMetadata(token);
   const verifyBase = {
     issuer: ISSUER,
     audience: AUDIENCE,
     ...extraOptions,
   };
 
-  if (SHARED_SECRET) {
-    return jwt.verify(token, SHARED_SECRET, {
-      algorithms: ["HS256"],
-      ...verifyBase,
-    });
-  }
+  try {
+    const payload = SHARED_SECRET
+      ? jwt.verify(token, SHARED_SECRET, {
+          algorithms: ["HS256"],
+          ...verifyBase,
+        })
+      : jwt.verify(token, PUBLIC_KEY, {
+          algorithms: ["RS256"],
+          ...verifyBase,
+        });
 
-  return jwt.verify(token, PUBLIC_KEY, {
-    algorithms: ["RS256"],
-    ...verifyBase,
-  });
+    logAuthDiagnostic("Access token verificado", metadata);
+    return payload;
+  } catch (error) {
+    logAuthDiagnostic(
+      "Fallo al verificar access token",
+      {
+        ...metadata,
+        errorName: error.name,
+        errorMessage: error.message,
+        expectedAlgorithms: SHARED_SECRET ? ["HS256"] : ["RS256"],
+        keyFingerprint: SHARED_SECRET ? fingerprint(SHARED_SECRET) : fingerprint(PUBLIC_KEY),
+      },
+      error.name === "TokenExpiredError" ? "warn" : "error"
+    );
+    throw error;
+  }
 }
 
-module.exports = { signAccessToken, verifyAccessToken };
+module.exports = { signAccessToken, verifyAccessToken, safeJwtMetadata };

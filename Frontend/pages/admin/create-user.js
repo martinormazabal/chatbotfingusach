@@ -7,8 +7,11 @@ import styles from "./createUser.module.css";
 const ADMIN_ROLE_OPTIONS = [
   { value: "estudiante", label: "Estudiante" },
   { value: "funcionario", label: "Funcionario" },
+  { value: "administrador de documentos", label: "Administrador de documentos" },
   { value: "admin", label: "Administrador" },
 ];
+
+const PRIVILEGED_CREATOR_ROLES = ["funcionario", "admin"];
 
 function getStoredSession() {
   const rawUser = localStorage.getItem("user");
@@ -16,12 +19,25 @@ function getStoredSession() {
 
   const parsedUser = JSON.parse(rawUser);
   const user = parsedUser?.user || parsedUser;
+  const PRIVILEGED_CREATOR_ROLES = ["funcionario", "admin"];
+
   return {
     ...user,
     role: (user?.role || "").toLowerCase(),
     email: (user?.email || "").toLowerCase(),
-    accessToken: user?.accessToken || parsedUser?.accessToken || "",
+    accessToken,
   };
+}
+
+function canUseCreateUserPanel(session) {
+  return (
+    PRIVILEGED_CREATOR_ROLES.includes(session?.role || "") ||
+    isRootAdminEmail(session?.email || "")
+  );
+}
+
+function clearStoredSession() {
+  localStorage.removeItem("user");
 }
 
 export default function CreateUser() {
@@ -40,14 +56,13 @@ export default function CreateUser() {
   useEffect(() => {
     try {
       const storedSession = getStoredSession();
-      const allowed =
-        storedSession?.role === "admin" || isRootAdminEmail(storedSession?.email || "");
+      const allowed = canUseCreateUserPanel(storedSession);
 
       setSession(storedSession);
       setIsAuthorized(Boolean(allowed));
 
       if (!allowed) {
-        setMessage("Solo un administrador autenticado puede crear usuarios con privilegios.");
+        setMessage("Solo un funcionario o administrador autenticado puede crear usuarios con privilegios.");
       }
     } catch {
       setSession(null);
@@ -64,7 +79,7 @@ export default function CreateUser() {
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!isAuthorized || !session?.accessToken) {
-      setMessage("Debes iniciar sesión como administrador para crear usuarios.");
+      setMessage("Debes iniciar sesión como funcionario o administrador para crear usuarios.");
       return;
     }
 
@@ -83,6 +98,11 @@ export default function CreateUser() {
       const data = await response.json();
 
       if (response.ok) {
+        if (response.status === 401) {
+          clearStoredSession();
+          setSession(null);
+          setIsAuthorized(false);
+        }
         setMessage(`Usuario creado exitosamente: ${data.user.email}`);
       } else {
         setMessage(data.error || data.message || "Error desconocido al registrar usuario");
@@ -106,7 +126,7 @@ export default function CreateUser() {
         <h1>Gestión de Usuarios</h1>
         <p>
           Completa los campos para crear una cuenta desde el panel administrativo protegido.
-          Los roles privilegiados solo se habilitan para administradores autenticados.
+          Los roles privilegiados solo se habilitan para funcionarios o administradores autenticados.
         </p>
         <ul className={styles.hints}>
           <li>Utiliza correos institucionales válidos.</li>
