@@ -35,7 +35,7 @@ describe('Authentication Tests', () => {
     cy.contains('button', 'Subir Documentos').should('not.exist');
   });
 
-  it('Documentos: Should log in and see only documentos-related buttons', () => {
+  it('Documentos admin: Should log in and see document and user management buttons', () => {
     cy.visit('/login');
     cy.get('input[type="email"]').type('documentos1@usach.cl');
     cy.get('input[type="password"]').type('estoHash');
@@ -49,8 +49,8 @@ describe('Authentication Tests', () => {
     cy.contains('button', 'Subir Documentos').should('exist');
     cy.contains('button', 'Ver Documentos Subidos').should('exist');
     cy.contains('button', 'Consultar Reglamentos').should('exist');
-    cy.contains('button', 'Crear Usuario').should('not.exist');
-    cy.contains('button', 'Asignar Rol').should('not.exist');
+    cy.contains('button', 'Crear Usuario').should('exist');
+    cy.contains('button', 'Asignar Rol').should('exist');
   });
 
   it('Should display error message when API limit is reached', () => {

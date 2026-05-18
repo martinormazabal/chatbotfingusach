@@ -50,7 +50,7 @@
       "@testing-library/jest-dom"
     ],
     "moduleNameMapper": {
-      "\\.(css|scss)$": "identity-obj-proxy"
+      "\\.(css|scss)$": "<rootDir>/__mocks__/styleMock.js"
     }
   }
 }

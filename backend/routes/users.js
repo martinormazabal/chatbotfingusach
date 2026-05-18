@@ -168,8 +168,8 @@ function sanitizeRole(role) {
 }
 
 function requireAdmin(req, res, next) {
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({ message: "Acceso denegado: requiere rol admin" });
+  if (!hasPrivilegedCreatorRole(req.user)) {
+    return res.status(403).json({ message: "Acceso denegado: requiere rol funcionario u admin" });
   }
   return next();
 }

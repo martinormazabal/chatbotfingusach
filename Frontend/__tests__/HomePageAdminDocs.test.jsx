@@ -29,12 +29,12 @@ describe('HomePage for administrador de documentos role', () => {
     render(<Home />);
 
     // Check for the buttons that should be visible
-    expect(screen.getByRole('button', { name: /Subir Documentos/i })).toBeVisible();
-    expect(screen.getByRole('button', { name: /Ver Documentos Subidos/i })).toBeVisible();
-    expect(screen.getByRole('button', { name: /Consultar Reglamentos/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /Subir Documentos/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /Ver Documentos Subidos/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /Consultar Reglamentos/i })).toBeVisible();
 
-    // Check that the admin-only buttons are NOT present
-    expect(screen.queryByRole('button', { name: /Crear Usuario/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Asignar Perfiles/i })).not.toBeInTheDocument();
+    // Check that administrador de documentos can manage users too
+    expect(screen.getByRole('link', { name: /Crear Usuario/i })).toBeVisible();
+    expect(screen.getByRole('link', { name: /Asignar Perfiles/i })).toBeVisible();
   });
 });
