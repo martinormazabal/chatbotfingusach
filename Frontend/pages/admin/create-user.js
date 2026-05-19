@@ -19,7 +19,8 @@ function getStoredSession() {
 
   const parsedUser = JSON.parse(rawUser);
   const user = parsedUser?.user || parsedUser;
-  const PRIVILEGED_CREATOR_ROLES = ["funcionario", "admin"];
+  const accessToken = parsedUser?.accessToken || user?.accessToken || "";
+
 
   return {
     ...user,
@@ -97,12 +98,13 @@ export default function CreateUser() {
       });
       const data = await response.json();
 
+      if (response.status === 401) {
+        clearStoredSession();
+        setSession(null);
+        setIsAuthorized(false);
+      }
+
       if (response.ok) {
-        if (response.status === 401) {
-          clearStoredSession();
-          setSession(null);
-          setIsAuthorized(false);
-        }
         setMessage(`Usuario creado exitosamente: ${data.user.email}`);
       } else {
         setMessage(data.error || data.message || "Error desconocido al registrar usuario");
