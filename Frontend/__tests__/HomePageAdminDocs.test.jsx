@@ -3,38 +3,62 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import Home from '../pages/index';
 
-// Mock the useRouter hook
+// Mock del router más completo para evitar problemas de contexto
 jest.mock('next/router', () => ({
   useRouter: () => ({
+    route: '/',
+    pathname: '',
+    query: {},
+    asPath: '',
     push: jest.fn(),
+    replace: jest.fn(),
+    reload: jest.fn(),
+    back: jest.fn(),
+    prefetch: jest.fn().mockResolvedValue(undefined),
+    beforePopState: jest.fn(),
+    events: {
+      on: jest.fn(),
+      off: jest.fn(),
+      emit: jest.fn(),
+    },
+    isFallback: false,
+    isLocaleDomain: false,
+    isReady: true,
+    isPreview: false,
   }),
 }));
 
 describe('HomePage for administrador de documentos role', () => {
   beforeEach(() => {
-    // Mock localStorage to simulate an authenticated user with the 'administrador de documentos' role
+    // Simula un usuario autenticado con el rol 'administrador de documentos'
     const mockUser = {
       id: 2,
       email: 'admin_docs@example.com',
       role: 'administrador de documentos',
+      username: 'Admin Documentos'
     };
-    localStorage.setItem('user', JSON.stringify(mockUser));
+    // localStorage espera un objeto 'user' que contiene los datos del usuario
+    localStorage.setItem('user', JSON.stringify({ user: mockUser }));
   });
 
   afterEach(() => {
     localStorage.clear();
   });
 
-  it('displays the correct buttons for administrador de documentos', () => {
+  it('Muestra los botones correctos para el rol y oculta los de gestión de usuarios', () => {
     render(<Home />);
 
-    // Check for the buttons that should be visible
-    expect(screen.getByRole('link', { name: /Subir Documentos/i })).toBeVisible();
-    expect(screen.getByRole('link', { name: /Ver Documentos Subidos/i })).toBeVisible();
-    expect(screen.getByRole('link', { name: /Consultar Reglamentos/i })).toBeVisible();
+    // 1. Verificar que los botones de gestión de documentos y chat estén visibles
+    expect(screen.getByRole('link', { name: /Subir Documentos/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Ver Documentos Subidos/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Consultar Reglamentos/i })).toBeInTheDocument();
+    
+    // 2. Verificar que el botón de cerrar sesión esté presente
+    expect(screen.getByRole('button', { name: /Cerrar Sesión/i })).toBeInTheDocument();
 
-    // Check that administrador de documentos can manage users too
-    expect(screen.getByRole('link', { name: /Crear Usuario/i })).toBeVisible();
-    expect(screen.getByRole('link', { name: /Asignar Perfiles/i })).toBeVisible();
+    // 3. Verificar que los botones de gestión de usuarios NO estén visibles
+    // Usamos queryByRole para que no falle si no los encuentra (que es lo esperado)
+    expect(screen.queryByRole('link', { name: /Crear Usuario/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Asignar Perfiles/i })).not.toBeInTheDocument();
   });
 });

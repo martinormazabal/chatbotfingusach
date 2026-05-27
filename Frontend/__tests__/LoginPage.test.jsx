@@ -18,13 +18,18 @@ describe('LoginPage Component', () => {
   });
 
   it('successfully logs in and stores user data in localStorage', async () => {
-    // Preparo el mock de axios.post
+    // El componente espera que la respuesta de axios tenga { data: { user: {...}, accessToken: '' } }
+    const mockUserData = {
+      id: 1,
+      email: 'test@example.com',
+      role: 'estudiante',
+    };
+    
     const mockAxiosPost = jest.fn(() =>
       Promise.resolve({
         data: {
-          id: 1,
-          email: 'test@example.com',
-          role: 'estudiante',
+          user: mockUserData,
+          accessToken: 'fake-jwt-token',
         },
       })
     );
@@ -32,18 +37,14 @@ describe('LoginPage Component', () => {
 
     render(<LoginPage />);
 
-    const emailInput = screen.getByPlaceholderText(/Correo/i);
-    const passwordInput = screen.getByPlaceholderText(/Contraseña/i);
+    const emailInput = screen.getByLabelText(/Correo institucional/i);
+    const passwordInput = screen.getByLabelText(/Contraseña/i);
     const loginButton = screen.getByRole('button', { name: /Ingresar/i });
 
-    // 1) Tipo en los inputs (await para que React procese el estado)
     await userEvent.type(emailInput, 'test@example.com');
     await userEvent.type(passwordInput, 'password123');
-
-    // 2) Click submit con userEvent
     await userEvent.click(loginButton);
 
-    // 3) Espero a que axios.post sea invocado
     await waitFor(() => {
       expect(mockAxiosPost).toHaveBeenCalledTimes(1);
       expect(mockAxiosPost).toHaveBeenCalledWith('/api/login', {
@@ -52,14 +53,14 @@ describe('LoginPage Component', () => {
       });
     });
 
-    // 4) Verifico localStorage y redirección
     const storedUser = JSON.parse(localStorage.getItem('user'));
+
+    // El objeto guardado ahora debe incluir el accessToken
     expect(storedUser).toEqual({
-      id: 1,
-      email: 'test@example.com',
-      role: 'estudiante',
+      ...mockUserData,
+      accessToken: 'fake-jwt-token',
     });
+    
     expect(mockPush).toHaveBeenCalledWith('/');
   });
 });
-

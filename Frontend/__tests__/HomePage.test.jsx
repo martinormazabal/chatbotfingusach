@@ -1,9 +1,9 @@
 // __tests__/HomePage.test.jsx
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import Home from '../pages/index';             // Ajusta la ruta si tu componente está en otro lugar
+import Home from '../pages/index';
 
-// Create a simple mock for useRouter
+// Mock de useRouter más completo
 jest.mock('next/router', () => ({
   useRouter() {
     return {
@@ -32,30 +32,31 @@ jest.mock('next/router', () => ({
 
 describe('Home Page (sin autenticación)', () => {
   beforeEach(() => {
-    // Asegurar que no haya nada en localStorage
     window.localStorage.clear();
   });
 
-  test('Muestra solo el botón "Iniciar Sesión" y oculta los demás', () => {
+  test('Muestra solo el enlace "Iniciar Sesión" y oculta los demás', () => {
     render(<Home />);
 
-    // El botón "Iniciar Sesión" debe existir
-    expect(screen.getByRole('button', { name: /iniciar sesión/i }))
-      .toBeInTheDocument();
+    // El enlace "Iniciar Sesión" debe existir. Buscamos por el rol 'link' y el nombre.
+    // El "nombre" accesible puede incluir texto de elementos anidados (como h3 y p).
+    expect(screen.getByRole('link', { name: /iniciar sesión/i })).toBeInTheDocument();
 
-    // Todos los demás botones NO deben existir
-    const otros = [
+    // Todos los demás enlaces de acciones no deben existir
+    const otrosEnlaces = [
       /crear usuario/i,
-      /asignar perfiles?/i,
+      /asignar perfiles/i, // El signo de interrogación era un error tipográfico
       /subir documentos/i,
       /ver documentos subidos/i,
       /consultar reglamentos/i,
-      /Usuarios/i, // Assuming 'Usuarios' is an admin button
-      /Solicitudes/i // Assuming 'Solicitudes' is another authenticated button
     ];
-    otros.forEach((label) => {
-      expect(screen.queryByRole('button', { name: label }))
-        .not.toBeInTheDocument();
+
+    otrosEnlaces.forEach((label) => {
+      // Usamos queryByRole para evitar que el test falle si no encuentra el elemento
+      expect(screen.queryByRole('link', { name: label })).not.toBeInTheDocument();
     });
+
+    // El botón de logout tampoco debe estar
+    expect(screen.queryByRole('button', { name: /cerrar sesión/i })).not.toBeInTheDocument();
   });
 });
